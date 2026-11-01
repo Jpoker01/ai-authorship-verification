@@ -8,8 +8,6 @@
 
 /conf/local/*
 
-requirements.txt
-
 __pycache__/ - compiled python bytecode
 *.py[cod] - compiled python files .pyc, .pyo, .pyd
 *$py.class - Leftover compiled files from older tools
