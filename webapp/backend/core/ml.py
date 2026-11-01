@@ -1,5 +1,8 @@
+import re
+
 import joblib
 import numpy as np
+from bs4 import BeautifulSoup
 
 from .config import MODEL_DIR, VECTORIZER_PATH, CLASSIFIER_PATH
 
@@ -49,6 +52,18 @@ def _load_models():
     _models_loaded = True
 
 
+def clean_text(text: str) -> str:
+    """
+    Clean the text the same way as the training data
+    (experiments/notebooks/dataset/20251128_JP-transformer_dataset_preprocessing.ipynb).
+    """
+    soup = BeautifulSoup(text, "html.parser")
+    text = re.sub(r'\[[^]]*\]', '', soup.get_text())
+    pattern = r"[^a-zA-z0-9\s,']"
+    text = re.sub(pattern, '', text)
+    return text
+
+
 def predict_probability(text1: str, text2: str) -> float:
     """
     Predict the probability that two texts are written by the same author.
@@ -66,6 +81,9 @@ def predict_probability(text1: str, text2: str) -> float:
     """
     # Load models on first call - if already loaded, return from the function
     _load_models()
+
+    text1 = clean_text(text1)
+    text2 = clean_text(text2)
 
     text1_embedding = _vectorizer.transform([text1])
     text2_embedding  = _vectorizer.transform([text2])
