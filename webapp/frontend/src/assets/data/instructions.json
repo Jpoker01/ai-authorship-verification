@@ -1,0 +1,18 @@
+[
+  {
+    "title": "What is Authorship Verification?",
+    "content": "Authorship verification is the process of determining whether two texts were written by the same author. This tool uses machine learning algorithms to analyze lexical features such as word choice, sentence structure, and writing patterns to assess the likelihood same authorship probability."
+  },
+  {
+    "title": "How to Use This Tool",
+    "content": "1. Enter two text samples in the input fields above. Ensure the limitations listed below are followed \n2. Click the button 'Analyze'\nThe tool will analyze both texts and provide a similarity score indicating the likelihood that they were written by the same author. A higher percentage indicates greater similarity."
+  },
+  {
+    "title": "Limitations",
+    "content": "• Texts must be in English\n• Minimum length 10,000 characters per text\n• Maximum length 100,000 characters per text\n• Additional details to get the best results possible listed in the 'Best Practices'"
+  },
+  {
+    "title": "Best Practices",
+    "content": "For optimal results:\n• Use texts of similar length (ideally around 20,000 characters each)\n• Avoid comparing texts with drastically different writing styles\n• Compare texts from similar time periods\n• Use complete, coherent passages rather than fragments"
+  }
+  ]

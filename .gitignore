@@ -1,0 +1,32 @@
+.git
+.git-credentials
+.ipynb_checkpoints/
+
+/data/01_processed
+/data/02_models
+/data/03_model_output
+
+/conf/local/*
+
+requirements.txt
+
+__pycache__/ - compiled python bytecode
+*.py[cod] - compiled python files .pyc, .pyo, .pyd
+*$py.class - Leftover compiled files from older tools
+*.so -compiled C extensions
+.Python - virtualend marker files
+
+webapp/.idea/webapp.iml
+webapp/.idea/vcs.xml
+webapp/.idea/modules.xml
+webapp/.idea/misc.xml
+webapp/.idea/inspectionProfiles/Project_Default.xml
+webapp/.idea/inspectionProfiles/profiles_settings.xml
+webapp/.idea/copilot.data.migration.ask2agent.xml
+.idea/vcs.xml
+.idea/modules.xml
+.idea/misc.xml
+.idea/inspectionProfiles/Project_Default.xml
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/copilot.data.migration.ask2agent.xml
+.idea/authorship_verification_dt.iml
