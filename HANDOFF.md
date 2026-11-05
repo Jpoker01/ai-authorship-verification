@@ -2,14 +2,14 @@
 
 2026-11-01 15:30
 
-Purpose: fix the bugs found in the experiment code of the diploma thesis (authorship verification), re-run the affected experiments on Metacentrum and compare the results with the submitted thesis. The original repository (github.com/Jpoker01/diploma_thesis, commit 59d98ab) stays UNTOUCHED until the supervisor approves the changes.
+Purpose: fix the bugs found in the experiment code of the diploma thesis (authorship verification), re-run the affected experiments on Metacentrum and compare the results with the submitted thesis.
 
 ## WORKFLOW
 
 1. This folder (diploma_thesis_v2) is a copy of the original repository without git history.
 2. The fixes are implemented here and pushed to a NEW GitHub repository (e.g. Jpoker01/diploma_thesis_v2).
 3. The new repository is cloned to Metacentrum, where the affected experiments are re-run.
-4. New results are logged to MLflow under new run names (suffix "_v2") and compared with experiments/results/prilohaC_MLFlow_all_experiments_export.xlsx.
+4. The new results are compared with the submitted ones (see COMPARISON).
 
 ## FIXES TO IMPLEMENT
 
@@ -97,6 +97,6 @@ Data on Metacentrum: the notebooks expect the cleaned datasets in experiments/da
 
 ## DO NOT FORGET
 
-- The original repository and the electronic appendix of the thesis stay unchanged until the supervisor replies!!!
+- The original repository (github.com/Jpoker01/diploma_thesis, commit 59d98ab) and the electronic appendix of the thesis stay UNTOUCHED until the supervisor replies!!!
 - The re-run results go to the errata ONLY if the supervisor agrees; otherwise they serve as backup material for the defense.
 - experiments/requirements.txt and conf/ are missing from the repository (gitignored). Export them from the Metacentrum environment this time (pip freeze) and commit them.
