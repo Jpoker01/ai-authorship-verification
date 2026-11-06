@@ -35,6 +35,11 @@ dependencies = [
 ]
 
 [dependency-groups]
+dev = [
+    "pytest",
+    "ruff"
+]
+
 transformer = [
     "torch",
     "transformers<5",        # notebooks use the 4.x Trainer API
@@ -49,7 +54,8 @@ llm = [
 ]
 
 [tool.uv]
-package = false
+package = true
+
 # Metacentrum (Linux x86_64) and local PyCharm (Windows) only
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
@@ -66,3 +72,26 @@ name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 # explicit = only packages mapped in [tool.uv.sources] are taken from this index
 explicit = true
+
+[build-system]
+requires = ["hatchling>=1.25,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# the import name differs from the project name "dt-experiments"
+packages = ["src/avcore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests"]
+# the v1 notebooks are NOT restyled (minimal changes)
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# line length is handled by "ruff format"
+ignore = ["E501"]
