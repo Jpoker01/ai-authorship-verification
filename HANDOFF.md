@@ -1,90 +1,70 @@
 # HANDOFF - diploma_thesis_v2
 
-2026-11-01 15:30
+2026-11-06 09:30 (replaces the version from 2026-11-01)
 
-Purpose: fix the bugs found in the experiment code of the diploma thesis (authorship verification), re-run the affected experiments on Metacentrum and compare the results with the submitted thesis.
+Purpose: fix the bugs found in the experiment code of the diploma thesis (authorship verification), rebuild and re-run ALL experiments with one unified methodology and report the new results. Deadline of the final thesis version: 6.1.2027.
 
 ## WORKFLOW
 
-1. This folder (diploma_thesis_v2) is a copy of the original repository without git history.
-2. The fixes are implemented here and pushed to a NEW GitHub repository (e.g. Jpoker01/diploma_thesis_v2).
-3. The new repository is cloned to Metacentrum, where the affected experiments are re-run.
-4. The new results are compared with the submitted ones (see COMPARISON).
+- Repository: the ORIGINAL repository github.com/Jpoker01/diploma_thesis, branch v2. The submitted state stays on main (commit 59d98ab) until v2 is merged.
+- Environment: uv. experiments/pyproject.toml + experiments/uv.lock define the exact versions; "uv sync --frozen" (add "--group transformer" or "--group llm") installs them. The transformer and llm groups conflict (different torch builds) and are NEVER installed together.
+- Every notebook is first rebuilt and smoke tested locally in PyCharm (small sample, 1 - 2 trials), only then run on Metacentrum.
+- Metacentrum = CERIT-SC Kubernetes Jupyter servers (A40 46GB). Each server has its OWN home volume, meaning uv, the repository and the data have to be set up on each server.
+- Runs are started from the server terminal with nohup + papermill, so they continue after the Jupyter tab is closed. One server per long notebook for maximum parallelism.
 
-## FIXES TO IMPLEMENT
+## SCOPE AND ORDER
 
-**1. Swapped accuracy and F1 (traditional and graph notebooks)**
+1. Faulty, longest first - the 3 transformer classification_head notebooks (full re-tuning, 30 trials).
+2. Faulty, CPU - the 7 traditional notebooks and the 2 ISG classifier notebooks.
+3. Unaffected, last - the 6 transformer embedding notebooks, the ISG embedding notebook and the 6 LLM notebooks.
 
-- The function evaluate_results returns (accuracy, precision, recall, f1), but the result is unpacked as (top_f1, top_accuracy, top_precision, top_recall). Values are therefore stored under the wrong names and Optuna maximizes accuracy instead of F1.
-- Fix: in EVERY call replace the left side with:
+- A notebook that is NOT re-run in time is reported with its v1 result. The thesis has to mark every result as v1 or v2, and the methodology has to state that the v1 runs used an unrecorded environment and an unseeded sampler.
+- Therefore results_v1/, the v1 MLflow runs and the v1 notebook outputs (main branch) stay UNTOUCHED!!!
 
-```txt
-top_accuracy, top_precision, top_recall, top_f1 = evaluate_results(y_test, y_pred)
-```
+## FIXES
 
-- The same line with y_val instead of y_test exists in the graph notebooks.
-- Files (7 occurrences in each, i.e. one in objective() and six final evaluations):
-    - experiments/notebooks/traditional/20251208_JP_traditional_word_TF-IDF_absolute_difference.ipynb
-    - experiments/notebooks/traditional/20251208_JP_traditional_word_TF-IDF_element-wise.ipynb
-    - experiments/notebooks/traditional/20251208_JP_traditional_word_BOW_absolute_difference.ipynb
-    - experiments/notebooks/traditional/20251208_JP_traditional_word_BOW_element-wise.ipynb
-    - experiments/notebooks/traditional/20251208_JP_traditional_char_TF-IDF_absolute_difference.ipynb
-    - experiments/notebooks/graph/20251127_JP_integrated_syntactic_graph_absolute_difference.ipynb
-    - experiments/notebooks/graph/20251127_JP_integrated_syntactic_graph_element-wise.ipynb
-- The patch fix_metric_unpacking.patch (49 lines) does exactly this; it can be applied with "git apply" once the folder is a git repository.
+**1. Swapped accuracy and F1 (traditional and graph notebooks)** - DONE
 
-**2. Validation run on test data (cosine similarity notebooks)**
+- evaluate_results returns (accuracy, precision, recall, f1), but was unpacked as (top_f1, top_accuracy, top_precision, top_recall), meaning Optuna maximized accuracy instead of F1.
 
-- The function compute_similarities(train_df, test_df, vectorizer) ignores the parameter test_df and iterates over the global test_data_df, meaning the Optuna objective scored the TEST set instead of the validation set.
-- Fix: inside compute_similarities replace every test_data_df with test_df (the loop header and the four .loc lines).
-- Files:
-    - experiments/notebooks/traditional/20251208_JP_traditional_word_TF-IDF_embedding.ipynb
-    - experiments/notebooks/traditional/20251208_JP_traditional_word_BOW_embedding.ipynb
+**2. Validation run on test data (word TF-IDF/BoW embedding notebooks)** - DONE
 
-**3. Duplicated training pairs (transformers)**
+- compute_similarities ignored its test_df parameter and iterated over the global test_data_df, meaning the Optuna objective scored the TEST set.
 
-- train_tuning_data_df is sampled from train_data_df, but the final training set is built as pd.concat([train_data_df, train_tuning_data_df, val_data_df]), meaning 10 000 (Longformer) or 19 999 (BigBird, ModernBERT) pairs are present twice.
-- Fix: remove train_tuning_data_df from the concat.
-- Files:
-    - experiments/notebooks/transformer/20251127_JP_ longformer-base-4096_classification_head.ipynb
-    - experiments/notebooks/transformer/20251127_JP_ bigbird-roberta-large_classification_head.ipynb
-    - experiments/notebooks/transformer/20251127_JP_ ModernBERT-large_classification_head.ipynb
+**3. Duplicated training pairs (transformer classification_head)** - DONE
 
-**4. Wrong model name (BigBird)**
+- The final training set was pd.concat([train_data_df, train_tuning_data_df, val_data_df]), while train_tuning_data_df is a sample of train_data_df, meaning 10 000 (Longformer) or 19 999 (BigBird, ModernBERT) pairs were present twice.
 
-- The notebooks load google/bigbird-roberta-base, the thesis states large. The code is correct, ONLY the thesis text is wrong. Optionally rename the notebook files to bigbird-roberta-base so the names match the code.
+**4. Classifier dropout never applied (transformer classification_head)** - TO DO
 
-**5. Missing preprocessing in the web application**
+- The tuned classifier_dropout was written into the config AFTER the model was built and the config was never passed to the model; the objective even assigned the range (0.0, 0.3) instead of the sampled value. Dropout therefore stayed at the pretrained default in ALL trials and final runs.
+- Fix: apply the sampled value to the classification head after loading the model, in the objective AND in the final training.
 
-- webapp/backend/core/ml.py sends the raw user text to the vectorizer. The clean_text function from experiments/notebooks/dataset/20251128_JP-transformer_dataset_preprocessing.ipynb has to be applied to both texts before transform.
-- NOTE: this does not affect any experiment and is not part of the re-run. It should be fixed before the defense anyway.
+**5. Wrong model name (BigBird)**
 
-## CHANGES REQUIRED FOR THE RE-RUN
+- The notebooks load google/bigbird-roberta-base, the thesis states large. Only the thesis text (and the notebook file names) is wrong.
 
-These are not bug fixes, however without them the re-run would NOT produce a valid comparison:
+**6. Missing preprocessing in the web application**
 
-- **Fresh Optuna studies.** Every notebook uses create_study(..., load_if_exists=True) with the same study name and SQLite file, and some use n_trials=30 - len(study.trials). Run as is, the notebook would resume the OLD study and run zero new trials. Either delete/move the old optuna_study_* files from the notebook folders, or change the study name (e.g. suffix "_v2").
-- **Seed the sampler.** Add sampler=optuna.samplers.TPESampler(seed=42) to create_study. Without it the re-run is not reproducible.
-- **New MLflow run names.** Add the suffix "_v2" to every run_name, so the old and new runs can be compared side by side in MLflow.
-- **Log per-pair predictions.** Log the test predictions (id, actual, predicted) as an MLflow table in the traditional and graph notebooks, the same way the transformer notebooks already do. This is needed for confidence intervals and a McNemar test at the defense.
-- Everything else (validation split, preprocessing, TF-IDF parameter ranges, classifier parameter ranges, 30 trials) stays EXACTLY the same, so that any difference comes from the fix only.
+- webapp/backend/core/ml.py sends the raw user text to the vectorizer; clean_text has to be applied to both texts first. Does not affect any experiment.
 
-## WHAT TO RE-RUN AND IN WHICH ORDER
+## UNIFIED RE-RUN SETUP (ALL notebooks)
 
-1. traditional_word_TF-IDF_absolute_difference - the deployed model; logistic regression first (~13h for 30 trials), then the other classifiers.
-2. traditional_word_TF-IDF_element-wise, traditional_word_BOW_absolute_difference, traditional_word_BOW_element-wise.
-3. integrated_syntactic_graph_absolute_difference, integrated_syntactic_graph_element-wise - the ISG vectors (*.npz) do NOT have to be rebuilt, only the classifiers.
-4. traditional_word_TF-IDF_embedding, traditional_word_BOW_embedding - cheap, only threshold and vectorizer tuning.
-5. Transformers - OPTIONAL. 2 - 4 days each on H100. The submitted numbers are valid as produced; the duplication only has to be disclosed. Re-run only if there is spare time, Longformer first.
+- Fresh Optuna studies - study name and SQLite file with the suffix "_v2", so the old study is NEVER resumed.
+- Seeded sampler - optuna.samplers.TPESampler(seed=42); transformers.set_seed(42) in the transformer notebooks.
+- 30 trials counted as COMPLETE + PRUNED only (MaxTrialsCallback), failed trials (e.g. OOM) are recorded but do not count.
+- MLflow run names with the suffix "_v2"; library versions logged as tags and uv.lock as an artifact.
+- Per-pair test predictions (id, actual, predicted) logged as an MLflow table in every notebook (confidence intervals, McNemar test at the defense).
+- Everything else (data splits, preprocessing, parameter ranges) stays EXACTLY as in v1.
 
-Data on Metacentrum: the notebooks expect the cleaned datasets in experiments/data/01_processed/ and the ISG vectors in the same folder. Neither is in git (data/ is ignored), so they have to be copied from the original Metacentrum storage.
+## DATA
+
+- The notebooks expect the cleaned datasets and the ISG vectors (*.npz) in experiments/data/01_processed/. They are NOT in git and have to be copied to every server.
 
 ## COMPARISON
 
-- Export the new MLflow runs the same way as prilohaC_MLFlow_all_experiments_export.xlsx.
-- Compare per model: old F1 (correctly relabelled, i.e. the old top_recall column) vs. new F1, old best hyperparameters vs. new.
-- Expected outcome: differences within about 0,5 p. b.; the selected hyperparameters may differ because the sampler was not seeded before.
-- Reference values (old export, correctly relabelled):
+- Export the v2 MLflow runs the same way as prilohaC_MLFlow_all_experiments_export.xlsx.
+- v1 reference values (old export, correctly relabelled):
 
 | Model | F1 | Accuracy |
 |---|---|---|
@@ -95,8 +75,6 @@ Data on Metacentrum: the notebooks expect the cleaned datasets in experiments/da
 | BoW abs. diff. + LinearSVC | 87,17 | 87,65 |
 | ISG abs. diff. + logistic regression | 86,26 | 86,69 |
 
-## DO NOT FORGET
+## TO VERIFY
 
-- The original repository (github.com/Jpoker01/diploma_thesis, commit 59d98ab) and the electronic appendix of the thesis stay UNTOUCHED until the supervisor replies!!!
-- The re-run results go to the errata ONLY if the supervisor agrees; otherwise they serve as backup material for the defense.
-- experiments/requirements.txt and conf/ are missing from the repository (gitignored). Export them from the Metacentrum environment this time (pip freeze) and commit them.
+- warmup_ratio choices are [0.0, 0.5, 0.1] in the transformer notebooks; 0.5 looks like a typo for 0.05. It has to match what the thesis states BEFORE the re-tuning starts.
