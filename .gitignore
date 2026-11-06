@@ -18,5 +18,5 @@ __pycache__/
 
 # Experiment data, models and local config (PAN data has restricted access and are too large)
 experiments/data/
-expriments/conf/local/
+experiments/conf/local/
 .env
