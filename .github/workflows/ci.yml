@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [v2]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: experiments
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6     # check the current major version first
+        with:
+          enable-cache: true
+      - run: uv sync --frozen           # base + dev group, exactly the lock
+      - run: uv run --frozen ruff check
+      - run: uv run --frozen ruff format --check
+      - run: uv run --frozen pytest
