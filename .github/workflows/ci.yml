@@ -4,19 +4,31 @@ on:
   push:
     branches: [v2]
   pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:                                  # C1.2-8, same indent as runs-on
+      MLFLOW_TRACKING_URI: file:./mlruns
     defaults:
       run:
         working-directory: experiments
     steps:
       - uses: actions/checkout@v6.1.0
-      - uses: astral-sh/setup-uv@v6     # check the current major version first
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
       - run: uv sync --frozen           # base + dev group, exactly the lock
       - run: uv run --frozen ruff check
       - run: uv run --frozen ruff format --check
-      - run: uv run --frozen pytest
+      - run: uv run --frozen pytest -m "not cerit"
