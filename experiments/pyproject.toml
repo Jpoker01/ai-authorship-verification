@@ -1,0 +1,68 @@
+[project]
+name = "dt-experiments"
+version = "2.0.0"
+description = "Experiments of the diploma thesis 'Authorship verification using selected artificial intelligence methods' (v2 re-run)"
+requires-python = "==3.11.*"
+dependencies = [
+    # core ML (kept from the original run)
+    "scikit-learn==1.3.2",
+    "statsmodels==0.14.0",
+    # data handling
+    "numpy<2",
+    "pandas<3",              # pandas 3 changes copy and string semantics
+    "scipy",
+    "joblib",
+    "tqdm",
+    "openpyxl",
+    # classifiers and hyperparameter search
+    "xgboost",
+    "optuna<5",
+    # experiment tracking (Databricks-hosted MLflow)
+    "mlflow",
+    "databricks-sdk",
+    "python-dotenv",
+    # text preprocessing and graph representation
+    "beautifulsoup4",
+    "nltk",
+    "networkx",
+    "text2graphapi",
+    # plots
+    "matplotlib",
+    "seaborn",
+    # notebook execution (headless runs survive closing the Jupyter tab)
+    "ipykernel",
+    "papermill",
+]
+
+[dependency-groups]
+transformer = [
+    "torch",
+    "transformers<5",        # notebooks use the 4.x Trainer API
+    "accelerate",
+    "huggingface_hub",
+]
+# vLLM pins its own torch version, so it lives in a separate group
+llm = [
+    "vllm",
+    "transformers<5",
+    "huggingface_hub",
+]
+
+[tool.uv]
+package = false
+# Metacentrum (Linux x86_64) and local PyCharm (Windows) only
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'win32'",
+]
+# transformer and llm need different torch builds; never install both into one environment
+conflicts = [[{ group = "transformer" }, { group = "llm" }]]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", group = "transformer" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+# explicit = only packages mapped in [tool.uv.sources] are taken from this index
+explicit = true
