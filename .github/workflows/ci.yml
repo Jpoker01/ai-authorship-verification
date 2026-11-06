@@ -12,7 +12,7 @@ jobs:
       run:
         working-directory: experiments
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.1.0
       - uses: astral-sh/setup-uv@v6     # check the current major version first
         with:
           enable-cache: true
