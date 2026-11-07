@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:                                  # C1.2-8, same indent as runs-on
+    env:
       MLFLOW_TRACKING_URI: file:./mlruns
     defaults:
       run:

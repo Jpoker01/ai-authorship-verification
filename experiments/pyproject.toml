@@ -84,6 +84,7 @@ packages = ["src/avcore"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = ["cerit: needs the transformer group, a GPU, PAN data or downloaded resources - run on CERIT"]
 
 [tool.ruff]
 target-version = "py311"
