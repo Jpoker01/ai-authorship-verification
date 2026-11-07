@@ -157,3 +157,9 @@ def test_select_best_threshold_tie_takes_lowest() -> None:
     )
     best_row = select_best_threshold(results_df)
     assert best_row["threshold"] == 0.2
+
+def test_select_best_threshold_rejects_empty() -> None:
+    """An empty table raises ValueError."""
+    results_df = pd.DataFrame(columns=["threshold", "f1", "f1_unrounded"])
+    with pytest.raises(ValueError):
+        select_best_threshold(results_df)
