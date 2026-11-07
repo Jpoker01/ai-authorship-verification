@@ -115,3 +115,27 @@ def evaluate_classification_thresholds(
             }
         )
     return pd.DataFrame(rows, columns=["threshold", *METRIC_COLUMNS, "f1_unrounded"])
+
+
+def select_best_threshold(threshold_results_df: pd.DataFrame) -> pd.Series:
+    """Return the row with the highest unrounded F1, if there are equal values the lowest threshold wins.
+
+    Args:
+        threshold_results_df: Output of evaluate_classification_thresholds.
+
+    Returns:
+        The winning row (threshold, accuracy, precision, recall, f1, f1_unrounded).
+
+    Raises:
+        ValueError: If the DataFrame is empty.
+    """
+    if threshold_results_df.empty:
+        raise ValueError("DataFrame threshold_results_df is empty.")
+
+    ranked_df = threshold_results_df.sort_values(
+        ["f1_unrounded", "threshold"],
+        ascending=[False, True],
+        kind="stable"
+    )
+
+    return ranked_df.iloc[0]
