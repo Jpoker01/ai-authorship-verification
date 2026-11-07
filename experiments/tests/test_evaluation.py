@@ -3,18 +3,18 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
-
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 from avcore.evaluation import (
     ClassificationMetrics,
-    evaluate_results,
     evaluate_classification_thresholds,
-    select_best_threshold
+    evaluate_results,
+    select_best_threshold,
 )
 
 Y_TRUE = np.array([1, 1, 1, 0, 0, 0, 1, 0, 1, 0])
 Y_PRED = np.array([1, 0, 1, 0, 1, 0, 1, 1, 1, 0])
+
 
 def test_evaluate_results_matches_sklearn() -> None:
     """Every metric equals the sklearn value in percent, rounded to 2 decimals."""
@@ -24,6 +24,7 @@ def test_evaluate_results_matches_sklearn() -> None:
     assert metrics.recall == round(recall_score(Y_TRUE, Y_PRED) * 100, 2)
     assert metrics.f1 == round(f1_score(Y_TRUE, Y_PRED) * 100, 2)
 
+
 def test_evaluate_results_fields_are_named() -> None:
     """The fields are read by name, so accuracy and F1 cannot be swapped by unpacking."""
     y_true = np.array([1, 1, 0, 0])
@@ -32,6 +33,7 @@ def test_evaluate_results_fields_are_named() -> None:
     assert isinstance(metrics, ClassificationMetrics)
     assert metrics.accuracy == 50.0
     assert metrics.f1 == 66.67
+
 
 def test_evaluate_results_no_positive_prediction_gives_zero() -> None:
     """Precision, recall and F1 are 0 when nothing is predicted as same author, without a warning."""
@@ -44,6 +46,7 @@ def test_evaluate_results_no_positive_prediction_gives_zero() -> None:
     assert metrics.recall == 0
     assert metrics.f1 == 0
 
+
 def test_evaluate_results_no_same_author_pair_gives_zero() -> None:
     """Recall and F1 are 0 when y_true has no same-author pair, without a warning."""
     y_true = np.array([0, 0, 0])
@@ -54,16 +57,19 @@ def test_evaluate_results_no_same_author_pair_gives_zero() -> None:
     assert metrics.recall == 0
     assert metrics.f1 == 0
 
+
 def test_evaluate_results_returns_plain_floats() -> None:
     """The fields are plain floats, not np.float64."""
     metrics = evaluate_results(Y_TRUE, Y_PRED)
     assert all(type(value) is float for value in metrics.to_dict().values())
+
 
 def test_evaluate_results_accepts_bool_labels() -> None:
     """Bool y_true (the 'same' column) and int y_pred give the same result as ints."""
     metrics = evaluate_results(Y_TRUE, Y_PRED)
     metrics_bool = evaluate_results(Y_TRUE.astype(bool), Y_PRED)
     assert metrics == metrics_bool
+
 
 def test_evaluate_results_rejects_length_mismatch() -> None:
     """Inputs of different length raise ValueError."""
@@ -85,7 +91,9 @@ def test_thresholds_use_greater_or_equal() -> None:
 def test_thresholds_one_row_per_threshold_in_order() -> None:
     """The output keeps the threshold order and has the expected columns."""
     thresholds = [0.2, 0.5, 0.8]
-    results_df = evaluate_classification_thresholds(Y_TRUE, np.linspace(0, 1, 10), thresholds)
+    results_df = evaluate_classification_thresholds(
+        Y_TRUE, np.linspace(0, 1, 10), thresholds
+    )
     assert list(results_df.columns) == [
         "threshold",
         "accuracy",
@@ -95,6 +103,7 @@ def test_thresholds_one_row_per_threshold_in_order() -> None:
         "f1_unrounded",
     ]
     assert results_df["threshold"].tolist() == thresholds
+
 
 def test_thresholds_match_evaluate_results() -> None:
     """Every row equals evaluate_results on the predictions of that threshold."""
@@ -107,6 +116,7 @@ def test_thresholds_match_evaluate_results() -> None:
         actual = row[["accuracy", "precision", "recall", "f1"]].to_dict()
         assert actual == expected.to_dict()
 
+
 @pytest.mark.parametrize(
     ("y_true", "scores", "thresholds"),
     [
@@ -117,10 +127,13 @@ def test_thresholds_match_evaluate_results() -> None:
     ],
     ids=["nan_score", "nan_label", "nan_threshold", "empty_grid"],
 )
-def test_thresholds_reject_invalid_input(y_true: np.ndarray, scores: np.ndarray, thresholds: list[float]) -> None:
+def test_thresholds_reject_invalid_input(
+    y_true: np.ndarray, scores: np.ndarray, thresholds: list[float]
+) -> None:
     """NaN anywhere or an empty grid raises instead of silently predicting 'different'."""
     with pytest.raises(ValueError):
         evaluate_classification_thresholds(y_true, scores, thresholds)
+
 
 def test_select_best_threshold_highest_f1() -> None:
     """The row with the highest F1 is selected."""
@@ -134,6 +147,7 @@ def test_select_best_threshold_highest_f1() -> None:
     best_row = select_best_threshold(results_df)
     assert best_row["threshold"] == 0.2
 
+
 def test_select_best_threshold_uses_unrounded_f1() -> None:
     """Of two rows rounded to the same F1, the truly higher one wins (92.376 vs 92.381)."""
     results_df = pd.DataFrame(
@@ -146,6 +160,7 @@ def test_select_best_threshold_uses_unrounded_f1() -> None:
     best_row = select_best_threshold(results_df)
     assert best_row["threshold"] == 0.2
 
+
 def test_select_best_threshold_tie_takes_lowest() -> None:
     """Among identical unrounded F1 the lowest threshold is selected."""
     results_df = pd.DataFrame(
@@ -157,6 +172,7 @@ def test_select_best_threshold_tie_takes_lowest() -> None:
     )
     best_row = select_best_threshold(results_df)
     assert best_row["threshold"] == 0.2
+
 
 def test_select_best_threshold_rejects_empty() -> None:
     """An empty table raises ValueError."""
