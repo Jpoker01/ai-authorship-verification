@@ -107,4 +107,18 @@ def test_thresholds_match_evaluate_results() -> None:
         actual = row[["accuracy", "precision", "recall", "f1"]].to_dict()
         assert actual == expected.to_dict()
 
+@pytest.mark.parametrize(
+    ("y_true", "scores", "thresholds"),
+    [
+        (np.array([1, 0]), np.array([0.5, np.nan]), [0.5]),
+        (np.array([1.0, np.nan]), np.array([0.5, 0.4]), [0.5]),
+        (np.array([1, 0]), np.array([0.5, 0.4]), [np.nan]),
+        (np.array([1, 0]), np.array([0.5, 0.4]), []),
+    ],
+    ids=["nan_score", "nan_label", "nan_threshold", "empty_grid"],
+)
+def test_thresholds_reject_invalid_input(y_true: np.ndarray, scores: np.ndarray, thresholds: list[float]) -> None:
+    """NaN anywhere or an empty grid raises instead of silently predicting 'different'."""
+    with pytest.raises(ValueError):
+        evaluate_classification_thresholds(y_true, scores, thresholds)
 
