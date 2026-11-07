@@ -68,6 +68,7 @@ def evaluate_results(
         f1=_to_percent(f1_score(y_true, y_pred, average=average, zero_division=0)),
     )
 
+
 def evaluate_classification_thresholds(
     y_true: npt.ArrayLike,
     scores: npt.ArrayLike,
@@ -133,9 +134,7 @@ def select_best_threshold(threshold_results_df: pd.DataFrame) -> pd.Series:
         raise ValueError("DataFrame threshold_results_df is empty.")
 
     ranked_df = threshold_results_df.sort_values(
-        ["f1_unrounded", "threshold"],
-        ascending=[False, True],
-        kind="stable"
+        ["f1_unrounded", "threshold"], ascending=[False, True], kind="stable"
     )
 
     return ranked_df.iloc[0]
