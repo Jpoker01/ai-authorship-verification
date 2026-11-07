@@ -115,5 +115,3 @@ def evaluate_classification_thresholds(
             }
         )
     return pd.DataFrame(rows, columns=["threshold", *METRIC_COLUMNS, "f1_unrounded"])
-
-        )
