@@ -72,4 +72,19 @@ def test_evaluate_results_rejects_length_mismatch() -> None:
     with pytest.raises(ValueError):
         evaluate_results(y_true, y_pred)
 
+def test_thresholds_one_row_per_threshold_in_order() -> None:
+    """The output keeps the threshold order and has the expected columns."""
+    thresholds = [0.2, 0.5, 0.8]
+    results_df = evaluate_classification_thresholds(Y_TRUE, np.linspace(0, 1, 10), thresholds)
+    assert list(results_df.columns) == [
+        "threshold",
+        "accuracy",
+        "precision",
+        "recall",
+        "f1",
+        "f1_unrounded",
+    ]
+    assert results_df["threshold"].tolist() == thresholds
+
+
 
