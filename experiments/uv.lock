@@ -727,7 +727,6 @@ dependencies = [
     { name = "openpyxl" },
     { name = "optuna" },
     { name = "pandas" },
-    { name = "pandas-stubs" },
     { name = "papermill" },
     { name = "python-dotenv" },
     { name = "scikit-learn" },
@@ -741,6 +740,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pandas-stubs" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -770,7 +770,6 @@ requires-dist = [
     { name = "openpyxl" },
     { name = "optuna", specifier = "<5" },
     { name = "pandas", specifier = "<3" },
-    { name = "pandas-stubs", specifier = "~=2.3.3" },
     { name = "papermill" },
     { name = "python-dotenv" },
     { name = "scikit-learn", specifier = "==1.3.2" },
@@ -784,6 +783,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pandas-stubs", specifier = "~=2.3.3" },
     { name = "pytest" },
     { name = "ruff" },
 ]
