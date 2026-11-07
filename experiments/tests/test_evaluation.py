@@ -127,7 +127,7 @@ def test_select_best_threshold_highest_f1() -> None:
     results_df = pd.DataFrame(
         {
             "threshold": [0.1, 0.2, 0.3],
-            "f1": [0.1, 0.2, 0.3],
+            "f1": [80.0, 90.0, 85.0],
             "f1_unrounded": [0.8, 0.9, 0.85],
         }
     )
@@ -141,6 +141,18 @@ def test_select_best_threshold_uses_unrounded_f1() -> None:
             "threshold": [0.1, 0.2],
             "f1": [92.38, 92.38],
             "f1_unrounded": [0.92376, 0.92381],
+        }
+    )
+    best_row = select_best_threshold(results_df)
+    assert best_row["threshold"] == 0.2
+
+def test_select_best_threshold_tie_takes_lowest() -> None:
+    """Among identical unrounded F1 the lowest threshold is selected."""
+    results_df = pd.DataFrame(
+        {
+            "threshold": [0.4, 0.1, 0.2, 0.3],
+            "f1": [90.0, 80.0, 90.0, 90.0],
+            "f1_unrounded": [0.9, 0.8, 0.9, 0.9],
         }
     )
     best_row = select_best_threshold(results_df)
