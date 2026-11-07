@@ -28,6 +28,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
+          version: "0.13.7"
       - run: uv sync --frozen           # base + dev group, exactly the lock
       - run: uv run --frozen ruff check
       - run: uv run --frozen ruff format --check
