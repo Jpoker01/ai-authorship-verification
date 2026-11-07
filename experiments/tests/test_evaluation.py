@@ -96,12 +96,15 @@ def test_thresholds_one_row_per_threshold_in_order() -> None:
     ]
     assert results_df["threshold"].tolist() == thresholds
 
-def test_thresholds_use_argument_grid() -> None:
-    """Only the passed grid is evaluated, never a notebook global."""
+def test_thresholds_match_evaluate_results() -> None:
+    """Every row equals evaluate_results on the predictions of that threshold."""
     scores = np.linspace(0, 1, 10)
-    thresholds = [0.3]
+    thresholds = [0.25, 0.55]
     results_df = evaluate_classification_thresholds(Y_TRUE, scores, thresholds)
-    assert results_df["threshold"].tolist() == thresholds
-
+    for _, row in results_df.iterrows():
+        y_pred = (scores >= row["threshold"]).astype(int)
+        expected = evaluate_results(Y_TRUE, y_pred)
+        actual = row[["accuracy", "precision", "recall", "f1"]].to_dict()
+        assert actual == expected.to_dict()
 
 
