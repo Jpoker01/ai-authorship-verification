@@ -67,3 +67,53 @@ def evaluate_results(
         ),
         f1=_to_percent(f1_score(y_true, y_pred, average=average, zero_division=0)),
     )
+
+def evaluate_classification_thresholds(
+    y_true: npt.ArrayLike,
+    scores: npt.ArrayLike,
+    thresholds: Sequence[float],
+) -> pd.DataFrame:
+    """Evaluate every threshold, predicting "same author" when score >= threshold.
+
+    Run it on validation data only - the selected threshold is then applied to test unchanged.
+
+    Args:
+        y_true: True labels, 0 / False = different author, 1 / True = same author.
+        scores: Same-author scores (probability or cosine similarity), higher = more likely the same author.
+        thresholds: Thresholds to evaluate, in the order of the output rows.
+
+    Returns:
+        One row per threshold with the columns threshold, accuracy, precision, recall, f1
+        (percent, rounded) and f1_unrounded (fraction, used only to rank the thresholds).
+
+    Raises:
+        ValueError: If thresholds is empty, y_true, scores or thresholds contain NaN,
+            or y_true and scores differ in length.
+    """
+    y_true = np.asarray(y_true)
+    scores = np.asarray(scores)
+    thresholds_array = np.asarray(thresholds, dtype=float)
+    if thresholds_array.size == 0:
+        raise ValueError("thresholds is empty.")
+    for name, values in [
+        ("y_true", y_true),
+        ("scores", scores),
+        ("thresholds", thresholds_array),
+    ]:
+        if pd.isna(values).any():
+            raise ValueError(f"{name} contains NaN.")
+
+    rows = []
+    for threshold in thresholds:
+        y_pred = (scores >= threshold).astype(int)
+        metrics = evaluate_results(y_true, y_pred)
+        rows.append(
+            {
+                "threshold": threshold,
+                **metrics.to_dict(),
+                "f1_unrounded": f1_score(y_true, y_pred, zero_division=0),
+            }
+        )
+    return pd.DataFrame(rows, columns=["threshold", *METRIC_COLUMNS, "f1_unrounded"])
+
+        )
