@@ -6,7 +6,6 @@ from dataclasses import asdict, dataclass
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from markdown_it.presets import zero
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 METRIC_COLUMNS = ["accuracy", "precision", "recall", "f1"]
@@ -30,10 +29,11 @@ def _to_percent(value: float) -> float:
     """Convert the fraction value to percentage rounded to two decimal places"""
     return float(round(value * 100, 2))
 
+
 def evaluate_results(
-        y_true: npt.ArrayLike,
-        y_pred: npt.ArrayLike,
-        average: str = "binary",
+    y_true: npt.ArrayLike,
+    y_pred: npt.ArrayLike,
+    average: str = "binary",
 ) -> ClassificationMetrics:
     """Compute accuracy, precision, recall and f1 in percentage.
 
@@ -46,14 +46,16 @@ def evaluate_results(
         The four metrics in percentage, rounded to two decimal places.
 
     Raises:
-        ValueErorr: If the inputs are empty or of different length.
+        ValueError: If the inputs are empty or of different length.
     """
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
     if y_true.size == 0:
         raise ValueError("y_true is an empty array")
     if y_true.shape != y_pred.shape:
-        raise ValueError(f"y_true has shape {y_true.shape}, and y_pred has shape {y_pred.shape}")
+        raise ValueError(
+            f"y_true has shape {y_true.shape}, and y_pred has shape {y_pred.shape}"
+        )
 
     return ClassificationMetrics(
         accuracy=_to_percent(accuracy_score(y_true, y_pred)),
@@ -63,6 +65,5 @@ def evaluate_results(
         recall=_to_percent(
             recall_score(y_true, y_pred, average=average, zero_division=0)
         ),
-        f1=_to_percent(
-            f1_score(y_true, y_pred, average=average, zero_division=0)),
+        f1=_to_percent(f1_score(y_true, y_pred, average=average, zero_division=0)),
     )
