@@ -122,3 +122,26 @@ def test_thresholds_reject_invalid_input(y_true: np.ndarray, scores: np.ndarray,
     with pytest.raises(ValueError):
         evaluate_classification_thresholds(y_true, scores, thresholds)
 
+def test_select_best_threshold_highest_f1() -> None:
+    """The row with the highest F1 is selected."""
+    results_df = pd.DataFrame(
+        {
+            "threshold": [0.1, 0.2, 0.3],
+            "f1": [0.1, 0.2, 0.3],
+            "f1_unrounded": [0.8, 0.9, 0.85],
+        }
+    )
+    best_row = select_best_threshold(results_df)
+    assert best_row["threshold"] == 0.2
+
+def test_select_best_threshold_uses_unrounded_f1() -> None:
+    """Of two rows rounded to the same F1, the truly higher one wins (92.376 vs 92.381)."""
+    results_df = pd.DataFrame(
+        {
+            "threshold": [0.1, 0.2],
+            "f1": [92.38, 92.38],
+            "f1_unrounded": [0.92376, 0.92381],
+        }
+    )
+    best_row = select_best_threshold(results_df)
+    assert best_row["threshold"] == 0.2
