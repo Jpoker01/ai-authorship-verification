@@ -72,6 +72,16 @@ def test_evaluate_results_rejects_length_mismatch() -> None:
     with pytest.raises(ValueError):
         evaluate_results(y_true, y_pred)
 
+
+def test_thresholds_use_greater_or_equal() -> None:
+    """A score equal to the threshold counts as same author"""
+    y_true = np.array([1, 0])
+    scores = np.array([0.5, 0, 4])
+    thresholds = [0.5]
+    results_df = evaluate_classification_thresholds(y_true, scores, thresholds)
+    assert results_df.loc[0, "accuracy"] == 100.0
+
+
 def test_thresholds_one_row_per_threshold_in_order() -> None:
     """The output keeps the threshold order and has the expected columns."""
     thresholds = [0.2, 0.5, 0.8]
@@ -85,6 +95,7 @@ def test_thresholds_one_row_per_threshold_in_order() -> None:
         "f1_unrounded",
     ]
     assert results_df["threshold"].tolist() == thresholds
+
 
 
 
