@@ -96,6 +96,12 @@ def test_thresholds_one_row_per_threshold_in_order() -> None:
     ]
     assert results_df["threshold"].tolist() == thresholds
 
+def test_thresholds_use_argument_grid() -> None:
+    """Only the passed grid is evaluated, never a notebook global."""
+    scores = np.linspace(0, 1, 10)
+    thresholds = [0.3]
+    results_df = evaluate_classification_thresholds(Y_TRUE, scores, thresholds)
+    assert results_df["threshold"].tolist() == thresholds
 
 
 
