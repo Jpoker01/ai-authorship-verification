@@ -17,9 +17,12 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Experiment data, models and local config (PAN data has restricted access and are too large)
-experiments/data/
-experiments/conf/local/
-.env
+experiments/data/raw/*
+experiments/data/processed/*
+experiments/data/models/*
+experiments/data/studies/*
+experiments/outputs/*
+!.gitkeep
 
 # PyCharm project files
 .idea/
