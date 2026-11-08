@@ -147,6 +147,18 @@ def test_thresholds_reject_invalid_input(
     with pytest.raises(ValueError, match=message):
         evaluate_classification_thresholds(y_true, scores, thresholds)
 
+def test_select_best_threshold_does_not_change_input() -> None:
+    """The input table is left unchanged."""
+    results_df = pd.DataFrame(
+        {
+            "threshold": [0.1, 0.2, 0.3],
+            "f1": [80.0, 90.0, 85.0],
+            "f1_unrounded": [0.8, 0.9, 0.85],
+        }
+    )
+    before_df = results_df.copy()
+    select_best_threshold(results_df)
+    pd.testing.assert_frame_equal(results_df, before_df)
 
 def test_select_best_threshold_highest_f1() -> None:
     """The row with the highest F1 is selected."""
