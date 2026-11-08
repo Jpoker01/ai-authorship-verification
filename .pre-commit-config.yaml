@@ -1,0 +1,18 @@
+# Formats every commit with the ruff from experiments/uv.lock, so the commit passes the CI ruff checks.
+# One-time per machine: uv tool install pre-commit==4.7.0
+# Once per clone: pre-commit install --allow-missing-config
+repos:
+  - repo: local
+    hooks:
+      # import sort before format
+      - id: ruff-import-sort
+        entry: uv run --frozen --project experiments ruff check --fix --select I --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter]
+        files: ^experiments/
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --frozen --project experiments ruff format --force-exclude
+        language: system
+        types_or: [ python, pyi, jupyter ]
+        files: ^experiments/
