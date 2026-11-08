@@ -5,7 +5,7 @@ Builds the cleaned jsonl files that every notebook family except the LLMs reads.
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from functools import partial
@@ -114,7 +114,7 @@ def _read_pair_line(line: str, clean_texts: bool) -> dict[str, str | list[str]]:
 
 
 def _parse_pair_lines(
-    lines: Iterator[str], clean_texts: bool, workers: int
+    lines: Iterable[str], clean_texts: bool, workers: int
 ) -> Iterator[dict[str, str | list[str]]]:
     """Yield _read_pair_line for every line, in the input order.
 
@@ -122,13 +122,14 @@ def _parse_pair_lines(
     _BATCH_LINES lines at a time, so only one batch of raw text is in memory.
 
     Args:
-        lines: The lines of a pairs file (an open file works).
+        lines: The lines of a pairs file (an open file or a list).
         clean_texts: Whether to apply clean_text to both texts.
         workers: Number of worker processes; 1 parses in this process.
 
     Yields:
         The id and the texts of every pair.
     """
+    lines = iter(lines)
     read_line = partial(_read_pair_line, clean_texts=clean_texts)
     if workers == 1:
         yield from map(read_line, lines)
