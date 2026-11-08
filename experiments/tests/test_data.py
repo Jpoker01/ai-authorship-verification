@@ -73,4 +73,6 @@ def test_load_pan_pairs_keeps_raw_texts_and_matches_labels_by_line(
     _write_raw_pan(pairs_path, truth_path, n_pairs=10)
     pairs_df = load_pan_pairs(pairs_path, truth_path)
     assert list(pairs_df.columns) == PAIR_COLUMNS
-    assert pairs_df["id"].tolist()
+    assert pairs_df["id"].tolist() == [f"p{i}" for i in range(10)]
+    assert pairs_df["same"].tolist() == [i % 2 == 0 for i in range(10)]
+    assert pairs_df["pair"][3] == ["<b>t</b>3a", "t_3b"]
