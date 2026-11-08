@@ -198,3 +198,13 @@ def test_write_pairs_jsonl_exact_bytes(tmp_path: Path) -> None:
         b'{"id": "a", "pair": ["\xc3\xa9", "x"], "same": true}\n'
         b'{"id": "b", "pair": ["y", "z"], "same": false}\n'
     )
+
+
+def test_write_pairs_jsonl_refuses_existing_file(tmp_path: Path) -> None:
+    """An existing file is never overwritten, its content stays as it was."""
+    path = tmp_path / "pairs.jsonl"
+    path.write_text("old content\n", encoding="utf-8")
+    pairs_df = pd.DataFrame({"id": ["a"], "pair": [["x", "y"]], "same": [True]})
+    with pytest.raises(FileExistsError):
+        write_pairs_jsonl(pairs_df, path)
+    assert path.read_text(encoding="utf-8") == "old content\n"
