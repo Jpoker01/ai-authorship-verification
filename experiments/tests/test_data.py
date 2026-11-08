@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from avcore.data import PAIR_COLUMNS, clean_text, load_pan_pairs, read_jsonl
@@ -147,3 +148,13 @@ def test_load_pan_pairs_rejects_three_texts(tmp_path: Path) -> None:
     _write_jsonl(truth_path, [{"id": "p0", "same": True}])
     with pytest.raises(ValueError, match="line 1: 3 texts instead of 2"):
         load_pan_pairs(pairs_path, truth_path)
+
+
+def test_load_pan_pairs_workers_give_the_same_result(tmp_path: Path) -> None:
+    """Cleaning in 2 worker processes gives the same frame as cleaning in this process."""
+    pairs_path = tmp_path / "pairs.jsonl"
+    truth_path = tmp_path / "truth.jsonl"
+    _write_raw_pan(pairs_path, truth_path, n_pairs=2500)
+    serial_df = load_pan_pairs(pairs_path, truth_path, clean_texts=True)
+    parallel_df = load_pan_pairs(pairs_path, truth_path, clean_texts=True, workers=2)
+    pd.testing.assert_frame_equal(serial_df, parallel_df)
