@@ -4,7 +4,7 @@ from pathlib import Path
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
     """Writes one JSON object per line, utf-8, like the PAN files."""
-    lines = [json.dumps(record, ensure_ascii=False) for record in records]
+    lines = [json.dumps(record, ensure_ascii=False) + "\n" for record in records]
     path.write_text("".join(lines), encoding="utf-8")
 
 
