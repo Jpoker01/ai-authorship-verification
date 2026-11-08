@@ -76,3 +76,31 @@ def test_load_pan_pairs_keeps_raw_texts_and_matches_labels_by_line(
     assert pairs_df["id"].tolist() == [f"p{i}" for i in range(10)]
     assert pairs_df["same"].tolist() == [i % 2 == 0 for i in range(10)]
     assert pairs_df["pair"][3] == ["<b>t</b>3a", "t_3b"]
+
+
+def test_load_pan_pairs_repeated_id_keeps_one_row_per_line(tmp_path: Path) -> None:
+    """An id that repeats gives one row per line with that line's label, never a cross product."""
+    pairs_path = tmp_path / "pairs.jsonl"
+    truth_path = tmp_path / "truth.jsonl"
+    _write_jsonl(
+        pairs_path,
+        [
+            {"id": "a", "pair": ["a1", "a2"]},
+            {"id": "b", "pair": ["b1", "b2"]},
+            {"id": "a", "pair": ["a3", "a4"]},
+        ],
+    )
+    _write_jsonl(
+        truth_path,
+        [
+            {"id": "a", "same": True},
+            {"id": "b", "same": False},
+            {"id": "a", "same": False},
+        ],
+    )
+    pairs_df = load_pan_pairs(pairs_path, truth_path)
+    assert pairs_df.to_dict(orient="records") == [
+        {"id": "a", "pair": ["a1", "a2"], "same": True},
+        {"id": "b", "pair": ["b1", "b2"], "same": False},
+        {"id": "a", "pair": ["a3", "a4"], "same": False},
+    ]
