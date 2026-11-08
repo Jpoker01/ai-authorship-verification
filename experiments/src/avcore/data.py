@@ -5,6 +5,7 @@ Builds the cleaned jsonl files that every notebook family except the LLMs reads.
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
@@ -56,3 +57,31 @@ def read_jsonl(path: Path) -> pd.DataFrame:
     with path.open(encoding="utf-8") as file:
         records = [json.loads(line) for line in file]
     return pd.DataFrame(records)
+
+
+@dataclass(frozen=True)
+class DatasetSplit:
+    """Train and validation part of the PAN 2020 training pairs.
+
+    Attributes:
+        train_df: Training pairs, in the shuffled order of train_test_split.
+        validation_df: Validation pairs, in the shuffled order of train_test_split.
+    """
+
+    train_df: pd.DataFrame
+    validation_df: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class DatasetCounts:
+    """Number of pairs written to each cleaned file.
+
+    Attributes:
+        train: Pairs in the training file.
+        validation: Pairs in the validation file.
+        test: Pairs in the test file.
+    """
+
+    train: int
+    validation: int
+    test: int
