@@ -103,4 +103,4 @@ def _read_pair_line(line: str, clean_texts: bool) -> dict[str, str | list[str]]:
     texts = record["pair"]
     if clean_texts:
         texts = [clean_text(text) for text in texts]
-    return {"id": record["id"], "texts": texts}
+    return {"id": record["id"], "pair": texts}
