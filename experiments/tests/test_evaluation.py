@@ -71,12 +71,14 @@ def test_evaluate_results_accepts_bool_labels() -> None:
     metrics_bool = evaluate_results(Y_TRUE.astype(bool), Y_PRED)
     assert metrics == metrics_bool
 
+
 def test_classification_metrics_is_frozen() -> None:
     """the metrics cannot be changed after they are computed"""
     metrics = evaluate_results(Y_TRUE, Y_PRED)
     with pytest.raises(dataclasses.FrozenInstanceError):
         # noinspection PyDataclass
         metrics.f1 = 0.0
+
 
 def test_evaluate_results_rejects_length_mismatch() -> None:
     """Inputs of different length raise ValueError."""
@@ -85,12 +87,14 @@ def test_evaluate_results_rejects_length_mismatch() -> None:
     with pytest.raises(ValueError, match="^y_true has shape"):
         evaluate_results(y_true, y_pred)
 
+
 def test_evaluate_results_rejects_empty_input() -> None:
     """Empty inputs raise ValueError instead of returning NaN accuracy."""
     y_true = np.array([])
     y_pred = np.array([])
     with pytest.raises(ValueError):
         evaluate_results(y_true, y_pred)
+
 
 def test_thresholds_use_greater_or_equal() -> None:
     """A score equal to the threshold counts as same author"""
@@ -130,6 +134,7 @@ def test_thresholds_match_evaluate_results() -> None:
         assert actual == expected.to_dict()
         assert row["f1_unrounded"] == f1_score(Y_TRUE, y_pred)
 
+
 @pytest.mark.parametrize(
     ("y_true", "scores", "thresholds", "message"),
     [
@@ -147,6 +152,7 @@ def test_thresholds_reject_invalid_input(
     with pytest.raises(ValueError, match=message):
         evaluate_classification_thresholds(y_true, scores, thresholds)
 
+
 def test_select_best_threshold_does_not_change_input() -> None:
     """The input table is left unchanged."""
     results_df = pd.DataFrame(
@@ -159,6 +165,7 @@ def test_select_best_threshold_does_not_change_input() -> None:
     before_df = results_df.copy()
     select_best_threshold(results_df)
     pd.testing.assert_frame_equal(results_df, before_df)
+
 
 def test_select_best_threshold_highest_f1() -> None:
     """The row with the highest F1 is selected."""
@@ -198,6 +205,7 @@ def test_select_best_threshold_tie_takes_lowest() -> None:
     best_row = select_best_threshold(results_df)
     assert best_row["threshold"] == 0.2
 
+
 def test_select_best_threshold_tie_ignores_float_noise() -> None:
     """Two F1 values that differ only in the last bit count as a tie."""
     results_df = pd.DataFrame(
@@ -216,6 +224,7 @@ def test_select_best_threshold_rejects_empty() -> None:
     results_df = pd.DataFrame(columns=["threshold", "f1", "f1_unrounded"])
     with pytest.raises(ValueError):
         select_best_threshold(results_df)
+
 
 def test_evaluate_results_all_negative_gives_zero_without_warning() -> None:
     """All-negative labels and predictions give F1 0 without a warning."""
