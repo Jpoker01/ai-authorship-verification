@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from avcore.data import clean_text, read_jsonl
+from avcore.data import PAIR_COLUMNS, clean_text, load_pan_pairs, read_jsonl
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -62,3 +62,15 @@ def test_read_jsonl_reads_utf8(tmp_path: Path) -> None:
     assert pairs_df.to_dict(orient="records") == [
         {"id": "a", "pair": ["café", "naïve"], "same": True}
     ]
+
+
+def test_load_pan_pairs_keeps_raw_texts_and_matches_labels_by_line(
+    tmp_path: Path,
+) -> None:
+    """Without cleaning, the texts stay raw, only id / pair / same are kept and line i gets the label of truth line i."""
+    pairs_path = tmp_path / "pairs.jsonl"
+    truth_path = tmp_path / "truth.jsonl"
+    _write_raw_pan(pairs_path, truth_path, n_pairs=10)
+    pairs_df = load_pan_pairs(pairs_path, truth_path)
+    assert list(pairs_df.columns) == PAIR_COLUMNS
+    assert pairs_df["id"].tolist()
