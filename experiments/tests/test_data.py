@@ -10,6 +10,7 @@ from avcore.data import (
     load_pan_pairs,
     read_jsonl,
     split_train_validation,
+    write_pairs_jsonl,
 )
 
 
@@ -178,3 +179,22 @@ def test_split_train_validation_pinned_ids() -> None:
     split = split_train_validation(pairs_df, validation_size=3, random_state=42)
     assert split.train_df["id"].tolist() == ["p0", "p7", "p2", "p9", "p4", "p3", "p6"]
     assert split.validation_df["id"].tolist() == ["p8", "p1", "p5"]
+
+
+def test_write_pairs_jsonl_exact_bytes(tmp_path: Path) -> None:
+    """One utf-8 JSON object per line in the order id, pair, same, ending in a single newline."""
+    path = tmp_path / "pairs.jsonl"
+    # columns in another order and an extra column, to check the selection and its order
+    pairs_df = pd.DataFrame(
+        {
+            "same": [True, False],
+            "extra": [1, 2],
+            "id": ["a", "b"],
+            "pair": [["é", "x"], ["y", "z"]],
+        }
+    )
+    write_pairs_jsonl(pairs_df, path)
+    assert path.read_bytes() == (
+        b'{"id": "a", "pair": ["\xc3\xa9", "x"], "same": true}\n'
+        b'{"id": "b", "pair": ["y", "z"], "same": false}\n'
+    )
