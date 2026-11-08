@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 from bs4 import BeautifulSoup
+from sklearn.model_selection import train_test_split
 
 PAIR_COLUMNS = ["id", "pair", "same"]
 VALIDATION_SIZE = 2_500
@@ -186,3 +187,27 @@ def load_pan_pairs(
                 raise ValueError(f"line {line_number}: {len(texts)} texts instead of 2")
             records.append({"id": pair_id, "pair": texts, "same": truth["same"]})
     return pd.DataFrame(records, columns=PAIR_COLUMNS)
+
+
+def split_train_validation(
+    pairs_df: pd.DataFrame,
+    validation_size: int = VALIDATION_SIZE,
+    random_state: int = RANDOM_STATE,
+) -> DatasetSplit:
+    """Split the training pairs into a training and a validation part.
+
+    Args:
+        pairs_df: All PAN 2020 training pairs.
+        validation_size: Number of pairs in the validation part.
+        random_state: Seed of the shuffle.
+
+    Returns:
+        The two parts, each in the shuffled order of train_test_split.
+    """
+    train_df, validation_df = train_test_split(
+        pairs_df,
+        test_size=validation_size,
+        random_state=random_state,
+        shuffle=True,
+    )
+    return DatasetSplit(train_df=train_df, validation_df=validation_df)
