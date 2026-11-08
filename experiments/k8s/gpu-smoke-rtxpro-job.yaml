@@ -1,0 +1,91 @@
+# Smoke test on the RTX PRO 6000 Blackwell (sm_120): same as gpu-smoke-job.yaml, only the GPU differs.
+# Reading nodes is forbidden in the namespace, so the label below (same pattern as NVIDIA-A100-80GB-PCIe)
+# is confirmed only when the pod gets scheduled; "didn't match node selector" in describe pod = wrong label.
+# Run from a terminal on the dt hub server, in ~/diploma_thesis:
+#   kubectl apply -f experiments/k8s/gpu-smoke-rtxpro-job.yaml
+#   kubectl wait --for=condition=complete --timeout=3600s job/gpu-smoke-rtxpro; kubectl logs job/gpu-smoke-rtxpro
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-smoke-rtxpro
+  labels:
+    app: dt-v2
+spec:
+  backoffLimit: 0                 # a failed test is not retried
+  activeDeadlineSeconds: 3600     # counts from creation, waiting for the GPU included
+  ttlSecondsAfterFinished: 86400  # the finished Job and its pod are deleted after 1 day
+  template:
+    metadata:
+      labels:
+        app: dt-v2
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false  # the training needs no Kubernetes API access
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition
+      securityContext:            # required by the CERIT Pod Security Admission
+        runAsNonRoot: true
+        runAsUser: 1000           # jovyan:users in the CERIT images, the owner of the home
+        runAsGroup: 100
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: smoke
+          image: cerit.io/hubs/tensorflowgpu:2.17.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: HOME
+              value: /home/jovyan
+            - name: XDG_CACHE_HOME  # the image sets /home//.cache (outside the PVC)
+              value: /home/jovyan/.cache
+            - name: OMP_NUM_THREADS  # = the CPU limit
+              value: "2"
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -x
+              nvidia-smi
+              cat /sys/fs/cgroup/cpu.max
+              df -h /dev/shm
+              id
+              readlink -f "$HOME/diploma_thesis/experiments/.venv/bin/python"
+              cat "$HOME/diploma_thesis/experiments/.venv/pyvenv.cfg"
+              git -C "$HOME/diploma_thesis" rev-parse --short HEAD
+              probe="$HOME/.write-probe-$HOSTNAME"
+              touch "$probe" && stat -c '%u:%g %a %n' "$probe" && rm -f "$probe"
+              exec "$HOME/diploma_thesis/experiments/.venv/bin/python" - <<'PY'
+              import torch
+              print(torch.__version__, torch.version.cuda, torch.cuda.is_available())
+              print(torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0), torch.cuda.get_arch_list())
+              assert torch.cuda.get_device_capability(0) == (12, 0), "not a Blackwell GPU"
+              print("cudnn", torch.backends.cudnn.version())
+              torch.nn.functional.conv2d(torch.randn(1, 1, 8, 8, device="cuda"), torch.randn(1, 1, 3, 3, device="cuda"))
+              print("libcudnn from", sorted({line.split()[-1] for line in open("/proc/self/maps") if "libcudnn.so" in line}))
+              x = torch.randn(4096, 4096, device="cuda")
+              print("matmul ok", (x @ x).sum().item())
+              PY
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "2"
+              memory: 8Gi           # /dev/shm below counts against this limit
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: home
+              mountPath: /home/jovyan
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: xpokor17-home-jupyter-xpokor17--dt  # the home of dt (matched by its pvc-8a8a6cee volume)
+        - name: dshm              # the default /dev/shm is only 64MB, too small for DataLoader workers
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
