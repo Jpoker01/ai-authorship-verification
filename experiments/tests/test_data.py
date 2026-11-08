@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from avcore.data import clean_text
+from avcore.data import clean_text, read_jsonl
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -52,3 +52,13 @@ def _write_raw_pan(
 def test_clean_text(text: str, expected: str) -> None:
     """Removes HTML and [...] blocks and keeps only letters, digits, whitespace, comma and apostrophe."""
     assert clean_text(text) == expected
+
+
+def test_read_jsonl_reads_utf8(tmp_path: Path) -> None:
+    """Non-ASCII text is decoded as utf-8, whatever the default encoding of the OS is."""
+    path = tmp_path / "pairs.jsonl"
+    _write_jsonl(path, [{"id": "a", "pair": ["café", "naïve"], "same": True}])
+    pairs_df = read_jsonl(path)
+    assert pairs_df.to_dict(orient="records") == [
+        {"id": "a", "pair": ["café", "naïve"], "same": True}
+    ]
