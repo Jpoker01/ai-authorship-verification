@@ -3,8 +3,11 @@
 Builds the cleaned jsonl files that every notebook family except the LLMs reads.
 """
 
+import json
 import re
+from pathlib import Path
 
+import pandas as pd
 from bs4 import BeautifulSoup
 
 PAIR_COLUMNS = ["id", "pair", "same"]
@@ -39,3 +42,17 @@ def clean_text(text: str) -> str:
     text_no_brackets = _BRACKET_BLOCK.sub("", text_html_parsed)
     text_desired_characters = _NOT_KEPT.sub("", text_no_brackets)
     return text_desired_characters
+
+
+def read_jsonl(path: Path) -> pd.DataFrame:
+    """Read a jsonl file (one JSON object per line) into a DataFrame.
+
+    Args:
+        path: Path to the jsonl file.
+
+    Returns:
+        One row per line, one column per key.
+    """
+    with path.open(encoding="utf-8") as file:
+        records = [json.loads(line) for line in file]
+    return pd.DataFrame(records)
