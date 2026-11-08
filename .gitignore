@@ -23,6 +23,8 @@ experiments/data/models/*
 experiments/data/studies/*
 experiments/outputs/*
 !.gitkeep
+experiments/conf/local
+.env
 
 # PyCharm project files
 .idea/
