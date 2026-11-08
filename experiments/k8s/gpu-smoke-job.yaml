@@ -54,6 +54,8 @@ spec:
               git -C "$HOME/diploma_thesis" rev-parse --short HEAD
               probe="$HOME/.write-probe-$HOSTNAME"
               touch "$probe" && stat -c '%u:%g %a %n' "$probe" && rm -f "$probe"
+              export LD_LIBRARY_PATH="$(printf '%s' "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -vx /opt/conda/lib | paste -sd: -)"
+              echo "LD_LIBRARY_PATH=[$LD_LIBRARY_PATH]"
               exec "$HOME/diploma_thesis/experiments/.venv/bin/python" - <<'PY'
               import torch
               print(torch.__version__, torch.version.cuda, torch.cuda.is_available())
