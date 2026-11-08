@@ -66,11 +66,11 @@ environments = [
 conflicts = [[{ group = "transformer" }, { group = "llm" }]]
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu126", group = "transformer" }]
+torch = [{ index = "pytorch-cu130", group = "transformer" }]
 
 [[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 # explicit = only packages mapped in [tool.uv.sources] are taken from this index
 explicit = true
 
