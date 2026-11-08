@@ -5,6 +5,8 @@ Builds the cleaned jsonl files that every notebook family except the LLMs reads.
 
 import re
 
+from bs4 import BeautifulSoup
+
 PAIR_COLUMNS = ["id", "pair", "same"]
 VALIDATION_SIZE = 2_500
 RANDOM_STATE = 42
@@ -22,3 +24,18 @@ TEST_CLEANED_FILE = "pan21-authorship-verification-test-cleaned.jsonl"
 # [^]] = any character except "]", so every [...] block is removed
 _BRACKET_BLOCK = re.compile(r"\[[^]]*\]")
 _NOT_KEPT = re.compile(r"[^a-zA-Z0-9\s,']")
+
+
+def clean_text(text: str) -> str:
+    """Remove HTML markup, [...] blocks and every character outside the kept set.
+
+    Args:
+        text: One raw PAN text.
+
+    Returns:
+        The text with only ASCII letters, digits, whitespace, commas and apostrophes.
+    """
+    text_html_parsed = BeautifulSoup(text, "html.parser").get_text()
+    text_no_brackets = _BRACKET_BLOCK.sub("", text_html_parsed)
+    text_desired_characters = _NOT_KEPT.sub("", text_no_brackets)
+    return text_desired_characters
