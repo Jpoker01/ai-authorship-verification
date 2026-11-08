@@ -137,3 +137,13 @@ def test_load_pan_pairs_rejects_misaligned_truth(
     _write_jsonl(truth_path, truth_records)
     with pytest.raises(ValueError, match=error_message):
         load_pan_pairs(pairs_path, truth_path)
+
+
+def test_load_pan_pairs_rejects_three_texts(tmp_path: Path) -> None:
+    """A pair with 3 texts stops the load with its line number."""
+    pairs_path = tmp_path / "pairs.jsonl"
+    truth_path = tmp_path / "truth.jsonl"
+    _write_jsonl(pairs_path, [{"id": "p0", "pair": ["a", "b", "c"]}])
+    _write_jsonl(truth_path, [{"id": "p0", "same": True}])
+    with pytest.raises(ValueError, match="line 1: 3 texts instead of 2"):
+        load_pan_pairs(pairs_path, truth_path)
