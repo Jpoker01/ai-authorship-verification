@@ -208,3 +208,17 @@ def test_write_pairs_jsonl_refuses_existing_file(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         write_pairs_jsonl(pairs_df, path)
     assert path.read_text(encoding="utf-8") == "old content\n"
+
+
+def test_write_then_read_round_trip(tmp_path: Path) -> None:
+    """A frame written by write_pairs_jsonl and read back by read_jsonl is unchanged."""
+    path = tmp_path / "pairs.jsonl"
+    pairs_df = pd.DataFrame(
+        {
+            "id": ["a", "b", "c"],
+            "pair": [["café", "x"], ["it's, ok", "y"], ["", "z"]],
+            "same": [True, False, True],
+        }
+    )
+    write_pairs_jsonl(pairs_df, path)
+    pd.testing.assert_frame_equal(read_jsonl(path), pairs_df)
