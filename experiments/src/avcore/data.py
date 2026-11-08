@@ -211,3 +211,18 @@ def split_train_validation(
         shuffle=True,
     )
     return DatasetSplit(train_df=train_df, validation_df=validation_df)
+
+
+def write_pairs_jsonl(pairs_df: pd.DataFrame, path: Path) -> None:
+    """Write the pairs as jsonl with the keys id, pair and same, one pair per line.
+
+    Args:
+        pairs_df: Pairs with the columns id, pair and same.
+        path: Target file; it must not exist yet.
+
+    Raises:
+        FileExistsError: If the target file already exists.
+    """
+    with path.open("x", encoding="utf-8") as file:
+        for record in pairs_df[PAIR_COLUMNS].to_dict(orient="records"):
+            file.write(json.dumps(record, ensure_ascii=False) + "\n")
