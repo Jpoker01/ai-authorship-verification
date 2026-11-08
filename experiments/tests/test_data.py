@@ -4,7 +4,13 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from avcore.data import PAIR_COLUMNS, clean_text, load_pan_pairs, read_jsonl
+from avcore.data import (
+    PAIR_COLUMNS,
+    clean_text,
+    load_pan_pairs,
+    read_jsonl,
+    split_train_validation,
+)
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -158,3 +164,17 @@ def test_load_pan_pairs_workers_give_the_same_result(tmp_path: Path) -> None:
     serial_df = load_pan_pairs(pairs_path, truth_path, clean_texts=True)
     parallel_df = load_pan_pairs(pairs_path, truth_path, clean_texts=True, workers=2)
     pd.testing.assert_frame_equal(serial_df, parallel_df)
+
+
+def test_split_train_validation_pinned_ids() -> None:
+    """The seeded split moves exactly these ids to validation and keeps the shuffled order."""
+    pairs_df = pd.DataFrame(
+        {
+            "id": [f"p{i}" for i in range(10)],
+            "pair": [[f"a{i}", f"b{i}"] for i in range(10)],
+            "same": [i % 2 == 0 for i in range(10)],
+        }
+    )
+    split = split_train_validation(pairs_df, validation_size=3, random_state=42)
+    assert split.train_df["id"].tolist() == ["p0", "p7", "p2", "p9", "p4", "p3", "p6"]
+    assert split.validation_df["id"].tolist() == ["p8", "p1", "p5"]
