@@ -24,4 +24,4 @@ experiments/conf/local/
 # PyCharm project files
 .idea/
 
-tools/
+/tools/
