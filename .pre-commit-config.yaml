@@ -6,6 +6,7 @@ repos:
     hooks:
       # import sort before format
       - id: ruff-import-sort
+        name: ruff import sort
         entry: uv run --frozen --project experiments ruff check --fix --select I --force-exclude
         language: system
         types_or: [python, pyi, jupyter]
