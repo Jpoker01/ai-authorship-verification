@@ -133,8 +133,12 @@ def select_best_threshold(threshold_results_df: pd.DataFrame) -> pd.Series:
     if threshold_results_df.empty:
         raise ValueError("DataFrame threshold_results_df is empty.")
 
+    # round(12) merges F1 values that differ only by float noise into a real tie
     ranked_df = threshold_results_df.sort_values(
-        ["f1_unrounded", "threshold"], ascending=[False, True], kind="stable"
+        ["f1_unrounded", "threshold"],
+        ascending=[False, True],
+        kind="stable",
+        key=lambda column: column.round(12),
     )
 
     return ranked_df.iloc[0]

@@ -1,3 +1,4 @@
+import dataclasses
 import warnings
 
 import numpy as np
@@ -70,14 +71,26 @@ def test_evaluate_results_accepts_bool_labels() -> None:
     metrics_bool = evaluate_results(Y_TRUE.astype(bool), Y_PRED)
     assert metrics == metrics_bool
 
+def test_classification_metrics_is_frozen() -> None:
+    """the metrics cannot be changed after they are computed"""
+    metrics = evaluate_results(Y_TRUE, Y_PRED)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        # noinspection PyDataclass
+        metrics.f1 = 0.0
 
 def test_evaluate_results_rejects_length_mismatch() -> None:
     """Inputs of different length raise ValueError."""
     y_true = np.array([1])
     y_pred = np.array([0, 0, 1])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^y_true has shape"):
         evaluate_results(y_true, y_pred)
 
+def test_evaluate_results_rejects_empty_input() -> None:
+    """Empty inputs raise ValueError instead of returning NaN accuracy."""
+    y_true = np.array([])
+    y_pred = np.array([])
+    with pytest.raises(ValueError):
+        evaluate_results(y_true, y_pred)
 
 def test_thresholds_use_greater_or_equal() -> None:
     """A score equal to the threshold counts as same author"""
@@ -115,24 +128,23 @@ def test_thresholds_match_evaluate_results() -> None:
         expected = evaluate_results(Y_TRUE, y_pred)
         actual = row[["accuracy", "precision", "recall", "f1"]].to_dict()
         assert actual == expected.to_dict()
-        assert row["f1_unrounded"] == f1_score(Y_true, y_pred)
-
+        assert row["f1_unrounded"] == f1_score(Y_TRUE, y_pred)
 
 @pytest.mark.parametrize(
-    ("y_true", "scores", "thresholds"),
+    ("y_true", "scores", "thresholds", "message"),
     [
-        (np.array([1, 0]), np.array([0.5, np.nan]), [0.5]),
-        (np.array([1.0, np.nan]), np.array([0.5, 0.4]), [0.5]),
-        (np.array([1, 0]), np.array([0.5, 0.4]), [np.nan]),
-        (np.array([1, 0]), np.array([0.5, 0.4]), []),
+        (np.array([1, 0]), np.array([0.5, np.nan]), [0.5], "^scores contains NaN"),
+        (np.array([1.0, np.nan]), np.array([0.5, 0.4]), [0.5], "^y_true contains NaN"),
+        (np.array([1, 0]), np.array([0.5, 0.4]), [np.nan], "^thresholds contains NaN"),
+        (np.array([1, 0]), np.array([0.5, 0.4]), [], "^thresholds is empty"),
     ],
     ids=["nan_score", "nan_label", "nan_threshold", "empty_grid"],
 )
 def test_thresholds_reject_invalid_input(
-    y_true: np.ndarray, scores: np.ndarray, thresholds: list[float]
+    y_true: np.ndarray, scores: np.ndarray, thresholds: list[float], message: str
 ) -> None:
     """NaN anywhere or an empty grid raises instead of silently predicting 'different'."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=message):
         evaluate_classification_thresholds(y_true, scores, thresholds)
 
 
@@ -174,9 +186,30 @@ def test_select_best_threshold_tie_takes_lowest() -> None:
     best_row = select_best_threshold(results_df)
     assert best_row["threshold"] == 0.2
 
+def test_select_best_threshold_tie_ignores_float_noise() -> None:
+    """Two F1 values that differ only in the last bit count as a tie."""
+    results_df = pd.DataFrame(
+        {
+            "threshold": [0.5, 0.6],
+            "f1": [88.89, 88.89],
+            "f1_unrounded": [8 / 9, np.nextafter(8 / 9, 1)],
+        }
+    )
+    best_row = select_best_threshold(results_df)
+    assert best_row["threshold"] == 0.5
+
 
 def test_select_best_threshold_rejects_empty() -> None:
     """An empty table raises ValueError."""
     results_df = pd.DataFrame(columns=["threshold", "f1", "f1_unrounded"])
     with pytest.raises(ValueError):
         select_best_threshold(results_df)
+
+def test_evaluate_results_all_negative_gives_zero_without_warning() -> None:
+    """All-negative labels and predictions give F1 0 without a warning."""
+    y_true = np.array([0, 0])
+    y_pred = np.array([0, 0])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        metrics = evaluate_results(y_true, y_pred)
+    assert metrics.f1 == 0
