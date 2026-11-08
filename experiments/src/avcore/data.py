@@ -5,7 +5,11 @@ Builds the cleaned jsonl files that every notebook family except the LLMs reads.
 
 import json
 import re
+from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import partial
+from itertools import islice
 from pathlib import Path
 
 import pandas as pd
@@ -28,6 +32,9 @@ TEST_CLEANED_FILE = "pan21-authorship-verification-test-cleaned.jsonl"
 # [^]] = any character except "]", so every [...] block is removed
 _BRACKET_BLOCK = re.compile(r"\[[^]]*\]")
 _NOT_KEPT = re.compile(r"[^a-zA-Z0-9\s,']")
+
+# pairs lines handed to the worker processes at once
+_BATCH_LINES = 1_024
 
 
 def clean_text(text: str) -> str:
@@ -104,3 +111,28 @@ def _read_pair_line(line: str, clean_texts: bool) -> dict[str, str | list[str]]:
     if clean_texts:
         texts = [clean_text(text) for text in texts]
     return {"id": record["id"], "pair": texts}
+
+
+def _parse_pair_lines(
+    lines: Iterator[str], clean_texts: bool, workers: int
+) -> Iterator[dict[str, str | list[str]]]:
+    """Yield _read_pair_line for every line, in the input order.
+
+    With workers > 1 the lines are parsed in worker processes, one batch of
+    _BATCH_LINES lines at a time, so only one batch of raw text is in memory.
+
+    Args:
+        lines: The lines of a pairs file (an open file works).
+        clean_texts: Whether to apply clean_text to both texts.
+        workers: Number of worker processes; 1 parses in this process.
+
+    Yields:
+        The id and the texts of every pair.
+    """
+    read_line = partial(_read_pair_line, clean_texts=clean_texts)
+    if workers == 1:
+        yield from map(read_line, lines)
+        return
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        while batch := list(islice(lines, _BATCH_LINES)):
+            yield from executor.map(read_line, batch, chunksize=16)
