@@ -1,6 +1,10 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from avcore.data import clean_text
+
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
     """Writes one JSON object per line, utf-8, like the PAN files."""
@@ -30,3 +34,21 @@ def _write_raw_pan(
     ]
     _write_jsonl(pairs_path, pairs)
     _write_jsonl(truth_path, truths)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("<b>bold</b> text", "bold text"),
+        ("&amp; don&#39;t", " don't"),
+        ("a [note] b", "a  b"),
+        ("[[x]] y", " y"),
+        *[(f"x{char}x", "xx") for char in "[\\]^_`"],
+        ("Ab 9,\t'\n  \x1c", "Ab 9,\t'\n  \x1c"),
+        *[(f"x{char}x", "xx") for char in '.!?;:-"()'],
+        ("café", "caf"),
+    ],
+)
+def test_clean_text(text: str, expected: str) -> None:
+    """Removes HTML and [...] blocks and keeps only letters, digits, whitespace, comma and apostrophe."""
+    assert clean_text(text) == expected
