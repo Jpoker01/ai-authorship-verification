@@ -137,3 +137,52 @@ def _parse_pair_lines(
     with ProcessPoolExecutor(max_workers=workers) as executor:
         while batch := list(islice(lines, _BATCH_LINES)):
             yield from executor.map(read_line, batch, chunksize=16)
+
+
+def load_pan_pairs(
+    pairs_path: Path,
+    truth_path: Path,
+    clean_texts: bool = False,
+    workers: int = 1,
+) -> pd.DataFrame:
+    """Load a PAN pairs file and its truth file into one DataFrame.
+
+    Line i of the truth file holds the label of line i of the pairs file, so both
+    files are read in step and a repeated id never multiplies the rows.
+
+    Args:
+        pairs_path: The pairs jsonl file (id, fandoms, pair).
+        truth_path: The truth jsonl file (id, same, authors).
+        clean_texts: Whether to apply clean_text to both texts of every pair.
+        workers: Number of worker processes that parse and clean the pairs lines.
+
+    Returns:
+        One row per pair with the columns id, pair and same, in the order of the pairs file.
+
+    Raises:
+        ValueError: If the files differ in length, the ids on a line differ
+        or a pair does not have exactly 2 texts.
+    """
+    records = []
+    with (
+        pairs_path.open(encoding="utf-8") as pairs_file,
+        truth_path.open(encoding="utf-8") as truth_file,
+    ):
+        pairs = _parse_pair_lines(pairs_file, clean_texts, workers)
+        # strict=True raises if one file has more lines than the other
+        lines_in_step = zip(pairs, truth_file, strict=True)
+        line_number = 0
+        for pair, truth_line in lines_in_step:
+            line_number += 1
+            truth = json.loads(truth_line)
+            pair_id = pair["id"]
+            texts = pair["pair"]
+
+            if pair_id != truth["id"]:
+                raise ValueError(
+                    f"line {line_number}: id {pair_id} does not match truth id {truth['id']}"
+                )
+            if len(texts) != 2:
+                raise ValueError(f"line {line_number}: {len(texts)} texts instead of 2")
+            records.append({"id": pair_id, "pair": texts, "same": truth["same"]})
+    return pd.DataFrame(records, columns=PAIR_COLUMNS)
