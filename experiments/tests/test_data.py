@@ -113,3 +113,27 @@ def test_load_pan_pairs_cleans_both_texts(tmp_path: Path) -> None:
     _write_raw_pan(pairs_path, truth_path, n_pairs=10)
     pairs_df = load_pan_pairs(pairs_path, truth_path, clean_texts=True)
     assert pairs_df["pair"].tolist() == [[f"t{i}a", f"t{i}b"] for i in range(10)]
+
+
+@pytest.mark.parametrize(
+    ("truth_records", "error_message"),
+    [
+        (
+            [{"id": "p0", "same": True}, {"id": "WRONG", "same": False}],
+            "line 2: id p1 does not match truth id WRONG",
+        ),
+        ([{"id": "p0", "same": True}], "shorter than argument 1"),
+    ],
+)
+def test_load_pan_pairs_rejects_misaligned_truth(
+    tmp_path: Path,
+    truth_records: list[dict],
+    error_message: str,
+) -> None:
+    """A truth line with another id, or a truth file with fewer lines, stops the load."""
+    pairs_path = tmp_path / "pairs.jsonl"
+    truth_path = tmp_path / "truth.jsonl"
+    _write_raw_pan(pairs_path, truth_path, n_pairs=10)
+    _write_jsonl(truth_path, truth_records)
+    with pytest.raises(ValueError, match=error_message):
+        load_pan_pairs(pairs_path, truth_path)
