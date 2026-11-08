@@ -85,3 +85,22 @@ class DatasetCounts:
     train: int
     validation: int
     test: int
+
+
+def _read_pair_line(line: str, clean_texts: bool) -> dict[str, str | list[str]]:
+    """Parse one line of a PAN pairs file, optionally cleaning both texts.
+
+    Defined at module level, so worker processes can import it.
+
+    Args:
+        line: One JSON line of the pairs file.
+        clean_texts: Whether to apply clean_text to both texts.
+
+    Returns:
+        The id and the texts of the pair; the fandoms are dropped.
+    """
+    record = json.loads(line)
+    texts = record["pair"]
+    if clean_texts:
+        texts = [clean_text(text) for text in texts]
+    return {"id": record["id"], "texts": texts}
