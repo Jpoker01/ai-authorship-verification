@@ -226,3 +226,63 @@ def write_pairs_jsonl(pairs_df: pd.DataFrame, path: Path) -> None:
     with path.open("x", encoding="utf-8", newline="\n") as file:
         for record in pairs_df[PAIR_COLUMNS].to_dict(orient="records"):
             file.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def build_cleaned_datasets(
+    raw_dir: Path,
+    output_dir: Path,
+    validation_size: int = VALIDATION_SIZE,
+    random_state: int = RANDOM_STATE,
+    workers: int = 1,
+) -> DatasetCounts:
+    """Builds the cleaned train, validation and test jsonl files from the raw PAN files.
+
+    Args:
+        raw_dir: Folder with the raw PAN pairs and truth files.
+        output_dir: Folder the cleaned files are written to, created if missing.
+        validation_size: Number of training pairs moved to the validation set.
+        random_state: Seed of the train / validation split.
+        workers: Number of processes that clean the texts.
+
+    Returns:
+        The number of pairs written to each file.
+
+    Raises:
+        FileExistsError: If any of the cleaned files already exists.
+    """
+    train_path = output_dir / TRAIN_CLEANED_FILE
+    validation_path = output_dir / VALIDATION_CLEANED_FILE
+    test_path = output_dir / TEST_CLEANED_FILE
+    # checked before any work, so a second run never leaves a half-built set
+    for path in (train_path, validation_path, test_path):
+        if path.exists():
+            raise FileExistsError(f"{path} already exists.")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    test_df = load_pan_pairs(
+        pairs_path=raw_dir / TEST_PAIRS_FILE,
+        truth_path=raw_dir / TEST_TRUTH_FILE,
+        clean_texts=True,
+        workers=workers,
+    )
+    write_pairs_jsonl(test_df, test_path)
+    test_count = len(test_df)
+    del test_df
+
+    train_full_df = load_pan_pairs(
+        pairs_path=raw_dir / TRAIN_PAIRS_FILE,
+        truth_path=raw_dir / TRAIN_TRUTH_FILE,
+        clean_texts=True,
+        workers=workers,
+    )
+    split = split_train_validation(
+        train_full_df, validation_size=validation_size, random_state=random_state
+    )
+
+    write_pairs_jsonl(split.train_df, train_path)
+    write_pairs_jsonl(split.validation_df, validation_path)
+    return DatasetCounts(
+        train=len(split.train_df),
+        validation=len(split.validation_df),
+        test=test_count,
+    )
