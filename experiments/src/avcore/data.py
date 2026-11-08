@@ -223,6 +223,6 @@ def write_pairs_jsonl(pairs_df: pd.DataFrame, path: Path) -> None:
     Raises:
         FileExistsError: If the target file already exists.
     """
-    with path.open("x", encoding="utf-8") as file:
+    with path.open("x", encoding="utf-8", newline="\n") as file:
         for record in pairs_df[PAIR_COLUMNS].to_dict(orient="records"):
             file.write(json.dumps(record, ensure_ascii=False) + "\n")
