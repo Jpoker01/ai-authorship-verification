@@ -46,7 +46,7 @@ def evaluate_results(
         The four metrics in percentage, rounded to two decimal places.
 
     Raises:
-        ValueError: If the inputs are empty or of different length.
+        ValueError: If the inputs are empty or of different shape.
     """
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)

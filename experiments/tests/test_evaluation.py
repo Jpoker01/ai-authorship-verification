@@ -90,7 +90,7 @@ def test_thresholds_use_greater_or_equal() -> None:
 
 def test_thresholds_one_row_per_threshold_in_order() -> None:
     """The output keeps the threshold order and has the expected columns."""
-    thresholds = [0.2, 0.5, 0.8]
+    thresholds = [0.8, 0.2, 0.5]
     results_df = evaluate_classification_thresholds(
         Y_TRUE, np.linspace(0, 1, 10), thresholds
     )
@@ -115,6 +115,7 @@ def test_thresholds_match_evaluate_results() -> None:
         expected = evaluate_results(Y_TRUE, y_pred)
         actual = row[["accuracy", "precision", "recall", "f1"]].to_dict()
         assert actual == expected.to_dict()
+        assert row["f1_unrounded"] == f1_score(Y_true, y_pred)
 
 
 @pytest.mark.parametrize(
