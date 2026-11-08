@@ -6,6 +6,15 @@ import pytest
 
 from avcore.data import (
     PAIR_COLUMNS,
+    TEST_CLEANED_FILE,
+    TEST_PAIRS_FILE,
+    TEST_TRUTH_FILE,
+    TRAIN_CLEANED_FILE,
+    TRAIN_PAIRS_FILE,
+    TRAIN_TRUTH_FILE,
+    VALIDATION_CLEANED_FILE,
+    DatasetCounts,
+    build_cleaned_datasets,
     clean_text,
     load_pan_pairs,
     read_jsonl,
@@ -222,3 +231,40 @@ def test_write_then_read_round_trip(tmp_path: Path) -> None:
     )
     write_pairs_jsonl(pairs_df, path)
     pd.testing.assert_frame_equal(read_jsonl(path), pairs_df)
+
+
+def test_build_cleaned_datasets_writes_the_three_files(tmp_path: Path) -> None:
+    """Test and train are loaded cleaned, train is split, and the 3 files hold the right rows."""
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    output_dir = tmp_path / "processed"
+    _write_raw_pan(raw_dir / TRAIN_PAIRS_FILE, raw_dir / TRAIN_TRUTH_FILE, n_pairs=10)
+    _write_raw_pan(
+        raw_dir / TEST_PAIRS_FILE, raw_dir / TEST_TRUTH_FILE, n_pairs=4, id_prefix="t"
+    )
+    counts = build_cleaned_datasets(raw_dir, output_dir, validation_size=3)
+    assert counts == DatasetCounts(train=7, validation=3, test=4)
+    train_df = read_jsonl(output_dir / TRAIN_CLEANED_FILE)
+    validation_df = read_jsonl(output_dir / VALIDATION_CLEANED_FILE)
+    test_df = read_jsonl(output_dir / TEST_CLEANED_FILE)
+    assert train_df["id"].tolist() == ["p0", "p7", "p2", "p9", "p4", "p3", "p6"]
+    assert validation_df["id"].tolist() == ["p8", "p1", "p5"]
+    assert test_df["id"].tolist() == ["t0", "t1", "t2", "t3"]
+    assert train_df["pair"][0] == ["t0a", "t0b"]
+    assert test_df["pair"][0] == ["t0a", "t0b"]
+
+
+def test_build_cleaned_datasets_refuses_before_writing(tmp_path: Path) -> None:
+    """If any cleaned file exists, the build stops before it writes anything."""
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    output_dir = tmp_path / "processed"
+    output_dir.mkdir()
+    _write_raw_pan(raw_dir / TRAIN_PAIRS_FILE, raw_dir / TRAIN_TRUTH_FILE, n_pairs=10)
+    _write_raw_pan(
+        raw_dir / TEST_PAIRS_FILE, raw_dir / TEST_TRUTH_FILE, n_pairs=4, id_prefix="t"
+    )
+    (output_dir / TRAIN_CLEANED_FILE).write_text("old content\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        build_cleaned_datasets(raw_dir, output_dir, validation_size=3)
+    assert sorted(path.name for path in output_dir.iterdir()) == [TRAIN_CLEANED_FILE]
