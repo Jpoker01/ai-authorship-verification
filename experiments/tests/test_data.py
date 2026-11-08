@@ -104,3 +104,12 @@ def test_load_pan_pairs_repeated_id_keeps_one_row_per_line(tmp_path: Path) -> No
         {"id": "b", "pair": ["b1", "b2"], "same": False},
         {"id": "a", "pair": ["a3", "a4"], "same": False},
     ]
+
+
+def test_load_pan_pairs_cleans_both_texts(tmp_path: Path) -> None:
+    """With clean_texts=True, BOTH texts of every pair go through clean_text."""
+    pairs_path = tmp_path / "pairs.jsonl"
+    truth_path = tmp_path / "truth.jsonl"
+    _write_raw_pan(pairs_path, truth_path, n_pairs=10)
+    pairs_df = load_pan_pairs(pairs_path, truth_path, clean_texts=True)
+    assert pairs_df["pair"].tolist() == [[f"t{i}a", f"t{i}b"] for i in range(10)]
