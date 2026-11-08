@@ -1,6 +1,6 @@
 # Smoke test of a background Kubernetes Job on CERIT: one A40, the notebook home PVC, the repo venv.
 # Run from a terminal on the dt hub server, in ~/diploma_thesis:
-#   kubectl apply -f tools/k8s/gpu-smoke-job.yaml
+#   kubectl apply -f experiments/k8s/gpu-smoke-job.yaml
 #   kubectl wait --for=condition=complete --timeout=3600s job/gpu-smoke; kubectl logs job/gpu-smoke
 apiVersion: batch/v1
 kind: Job
