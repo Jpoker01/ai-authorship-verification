@@ -23,10 +23,12 @@ def test_return_health_check(client: TestClient):
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {"status": "ok"}
 
+
 def test_root_endpoint_method_not_allowed(client):
     """Test that POST is not allowed on root endpoint."""
     response = client.post("/")
     assert response.status_code == 405
+
 
 def test_health_endpoint_method_not_allowed(client):
     """Test that POST is not allowed on health endpoint."""

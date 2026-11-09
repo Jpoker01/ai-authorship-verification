@@ -2,10 +2,7 @@ from fastapi import APIRouter, HTTPException
 from schemas.prediction import PredictionRequest, PredictionResponse
 from core import ml
 
-router = APIRouter(
-    prefix="/predict",
-    tags=["prediction"]
-)
+router = APIRouter(prefix="/predict", tags=["prediction"])
 
 
 @router.post("/", response_model=PredictionResponse)
@@ -26,7 +23,4 @@ async def predict_authorship(request: PredictionRequest):
         result = ml.predict(request.text1, request.text2)
         return PredictionResponse(**result)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")

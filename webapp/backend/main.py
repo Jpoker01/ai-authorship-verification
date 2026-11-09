@@ -5,7 +5,7 @@ from routers import predict
 app = FastAPI(
     title="Authorship Verification DT - backend",
     description="API for verifying if two texts are written by the same author",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # CORS set up - only for demo purposes
@@ -25,11 +25,7 @@ app.include_router(predict.router)
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {
-        "message": app.title,
-        "version": app.version,
-        "docs": "/docs"
-    }
+    return {"message": app.title, "version": app.version, "docs": "/docs"}
 
 
 @app.get("/health")
