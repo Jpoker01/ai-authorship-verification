@@ -44,6 +44,7 @@ def _finished(study: optuna.Study) -> list[tuple[dict, TrialState]]:
 
 
 def _crash_mid_trial(study: optuna.Study) -> None:
+    """Start a trial and leave it RUNNING, as a killed pod does."""
     trial = study.ask()
     trial.suggest_float("x", -10, 10)
     trial.suggest_int("y", 1, 5)
