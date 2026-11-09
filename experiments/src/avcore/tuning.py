@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import optuna
-from optuna.pruners import BasePruner
+from optuna.pruners import BasePruner, HyperbandPruner
 from optuna.study import MaxTrialsCallback, StudyDirection
 from optuna.trial import FrozenTrial, TrialState
 
@@ -84,21 +84,24 @@ def open_study(
 
     Args:
         study_path: Absolute path of the SQLite file; its stem is the study name.
-        pruner: Pruner of the study; failed trials are hidden from it.
+        pruner: Pruner of the study, not Hyperband; failed trials are hidden from it.
         seed: Seed of the first trial, stored in the study on creation.
 
     Returns:
         The study, maximizing, with the sampler for its next trial.
 
     Raises:
-        ValueError: If study_path is relative, the loaded study does not
-            maximize, or seed differs from the stored one.
+        ValueError: If study_path is relative, pruner is a HyperbandPruner, the
+            loaded study does not maximize, or seed differs from the stored one.
         FileNotFoundError: If the folder of study_path does not exist.
     """
     if not study_path.is_absolute():
         raise ValueError(f"{study_path} is not an absolute path.")
     if not study_path.parent.is_dir():
         raise FileNotFoundError(f"{study_path.parent} does not exist.")
+    # its brackets follow the trial number, which a retried crash shifts
+    if isinstance(pruner, HyperbandPruner):
+        raise ValueError("HyperbandPruner does not resume a crashed study correctly.")
     if pruner is not None:
         pruner = IgnoreFailedTrialsPruner(pruner)
     storage = optuna.storages.RDBStorage(f"sqlite:///{study_path}")
@@ -170,3 +173,13 @@ def run_study(
             _reseed_sampler,
         ],
     )
+
+def _raise_if_too_many_failures(study: optuna.Study, n_trials: int) -> None:
+    """Raise when n_trials trials failed without a crash - the study can not finish."""
+    failed_trials = study.get_trials(deepcopy=False, states=(TrialState.FAIL,))
+    failures = [trial for trial in failed_trials if
+                not trial.user_attrs.get("crashed")]
+    if len(failures) >= n_trials:
+        raise RuntimeError(
+            f"Study {study.study_name}: {len(failures)} trials failed without a crash."
+        )
