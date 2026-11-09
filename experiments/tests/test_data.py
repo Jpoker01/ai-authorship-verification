@@ -270,7 +270,12 @@ def test_build_cleaned_datasets_writes_the_three_files(tmp_path: Path) -> None:
     )
 
 
-def test_build_cleaned_datasets_refuses_before_writing(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "existing_file,", [TRAIN_CLEANED_FILE, VALIDATION_CLEANED_FILE, TEST_CLEANED_FILE]
+)
+def test_build_cleaned_datasets_refuses_before_writing(
+    tmp_path: Path, existing_file: str
+) -> None:
     """If any cleaned file exists, the build stops before it writes anything."""
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
@@ -280,7 +285,7 @@ def test_build_cleaned_datasets_refuses_before_writing(tmp_path: Path) -> None:
     _write_raw_pan(
         raw_dir / TEST_PAIRS_FILE, raw_dir / TEST_TRUTH_FILE, n_pairs=4, id_prefix="t"
     )
-    (output_dir / TRAIN_CLEANED_FILE).write_text("old content\n", encoding="utf-8")
+    (output_dir / existing_file).write_text("old content\n", encoding="utf-8")
     with pytest.raises(FileExistsError):
         build_cleaned_datasets(raw_dir, output_dir, validation_size=3)
-    assert sorted(path.name for path in output_dir.iterdir()) == [TRAIN_CLEANED_FILE]
+    assert sorted(path.name for path in output_dir.iterdir()) == [existing_file]
