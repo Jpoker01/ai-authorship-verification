@@ -141,3 +141,34 @@ def test_resume_after_a_finished_trial_repeats_nothing(tmp_path: Path) -> None:
     study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
     run_study(study, _objective, n_trials=15)
     assert _finished(study) == _finished(uninterrupted)
+
+def test_caught_error_fails_one_trial_and_continues(tmp_path: Path) -> None:
+    """An error in catch fails only its trial, and the next trial gets new params."""
+
+    def objective(trial: optuna.Trial) -> float:
+        if trial.number == 3:
+            trial.suggest_float("x", -10, 10)
+            trial.suggest_int("y", 1, 5)
+            raise MemoryError("out of memory")
+        return _objective(trial)
+
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    run_study(study, objective, n_trials=8, catch=(MemoryError,))
+    assert len(study.get_trials(states=FINISHED_STATES)) == 8
+    assert study.trials[3].state == TrialState.FAIL
+    assert study.trials[4].params != study.trials[3].params
+
+def test_failed_trial_does_not_take_part_in_pruning(tmp_path: Path) -> None:
+    """A failed trial's high step value does not prune the trials after it."""
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    failed_trial = study.ask()
+    failed_trial.report(10.0, 1)
+    failed_trial.should_prune()
+    study.tell(failed_trial, state=TrialState.FAIL)
+    should_prune = []
+    for value in (1.0, 2.0):
+        trial = study.ask()
+        trial.report(value, 1)
+        should_prune.append(trial.should_prune())
+        study.tell(trial, value)
+    assert should_prune == [False, False]
