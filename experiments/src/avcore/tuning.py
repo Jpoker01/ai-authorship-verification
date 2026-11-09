@@ -121,3 +121,34 @@ def open_study(
         study.tell(trial.number, state=TrialState.FAIL)
     _reseed_sampler(study)
     return study
+
+
+def run_study(
+        study: optuna.Study,
+        objective: Callable[[optuna.Trial], float],
+        n_trials: int = N_TRIALS,
+        catch: tuple[type[Exception], ...] = (),
+) -> None:
+    """Run trials one at a time until the study has n_trials finished trials.
+
+    Args:
+        study: Study returned by open_study.
+        objective: Function that trains and evaluates one trial.
+        n_trials: Number of complete + pruned trials to reach.
+        catch: Exceptions that fail one trial and let the study continue.
+    """
+
+    def objective_with_position(trial: optuna.Trial) -> float:
+        # the running trial is counted too, so its own position is one lower
+        trial.set_user_attr("position", _position(study) - 1)
+        return objective(trial)
+
+    study.optimize(
+        objective_with_position,
+        n_jobs=1,
+        catch=catch,
+        callbacks=[
+            MaxTrialsCallback(n_trials, states=FINISHED_STATES),
+            _reseed_sampler,
+        ],
+    )

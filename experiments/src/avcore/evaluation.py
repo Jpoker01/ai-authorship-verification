@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 import numpy.typing as npt
+import optuna
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
@@ -54,16 +55,16 @@ def evaluate_results(
         raise ValueError("y_true is an empty array")
     if y_true.shape != y_pred.shape:
         raise ValueError(
-            f"y_true has shape {y_true.shape}, and y_pred has shape {y_pred.shape}"
+            f"y_true has shape {y_true.shape}, and y_pred has shape {y_pred.shape}",
         )
 
     return ClassificationMetrics(
         accuracy=_to_percent(accuracy_score(y_true, y_pred)),
         precision=_to_percent(
-            precision_score(y_true, y_pred, average=average, zero_division=0)
+            precision_score(y_true, y_pred, average=average, zero_division=0),
         ),
         recall=_to_percent(
-            recall_score(y_true, y_pred, average=average, zero_division=0)
+            recall_score(y_true, y_pred, average=average, zero_division=0),
         ),
         f1=_to_percent(f1_score(y_true, y_pred, average=average, zero_division=0)),
     )
@@ -113,7 +114,7 @@ def evaluate_classification_thresholds(
                 "threshold": threshold,
                 **metrics.to_dict(),
                 "f1_unrounded": f1_score(y_true, y_pred, zero_division=0),
-            }
+            },
         )
     return pd.DataFrame(rows, columns=["threshold", *METRIC_COLUMNS, "f1_unrounded"])
 
