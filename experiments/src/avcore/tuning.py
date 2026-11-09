@@ -159,7 +159,7 @@ def run_study(
         catch: Exceptions that fail one trial and let the study continue.
 
     Raises:
-        RuntimeError: If the study holds n_trials failed trials that are not
+         RuntimeError: If the study holds n_trials failed trials that are not
             crashes (caught errors, NaN values), also from earlier runs.
     """
     finished_trials = study.get_trials(deepcopy=False, states=FINISHED_STATES)
