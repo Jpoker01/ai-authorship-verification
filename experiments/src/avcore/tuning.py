@@ -17,6 +17,7 @@ from avcore.data import RANDOM_STATE
 
 N_TRIALS = 30
 FINISHED_STATES = (TrialState.COMPLETE, TrialState.PRUNED)
+ENDED_STATES = (TrialState.COMPLETE, TrialState.PRUNED, TrialState.FAIL)
 NOT_FAILED_STATES = (
     TrialState.RUNNING,
     TrialState.COMPLETE,
