@@ -142,6 +142,7 @@ def test_resume_after_a_finished_trial_repeats_nothing(tmp_path: Path) -> None:
     run_study(study, _objective, n_trials=15)
     assert _finished(study) == _finished(uninterrupted)
 
+
 def test_caught_error_fails_one_trial_and_continues(tmp_path: Path) -> None:
     """An error in catch fails only its trial, and the next trial gets new params."""
 
@@ -158,6 +159,7 @@ def test_caught_error_fails_one_trial_and_continues(tmp_path: Path) -> None:
     assert study.trials[3].state == TrialState.FAIL
     assert study.trials[4].params != study.trials[3].params
 
+
 def test_failed_trial_does_not_take_part_in_pruning(tmp_path: Path) -> None:
     """A failed trial's high step value does not prune the trials after it."""
     study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
@@ -172,3 +174,47 @@ def test_failed_trial_does_not_take_part_in_pruning(tmp_path: Path) -> None:
         should_prune.append(trial.should_prune())
         study.tell(trial, value)
     assert should_prune == [False, False]
+
+
+def test_interrupted_trial_repeats_the_params_at_the_same_position(
+    tmp_path: Path,
+) -> None:
+    """A trial stopped by an error outside catch is repeated; the study ends as an uninterrupted one."""
+    uninterrupted = open_study(tmp_path / "uninterrupted_v2.db", pruner=_pruner())
+    run_study(uninterrupted, _objective, n_trials=15)
+    interrupted_numbers = []
+
+    def interrupted_objective(trial: optuna.Trial) -> float:
+        if trial.number == 5 and not interrupted_numbers:
+            interrupted_numbers.append(trial.number)
+            trial.suggest_float("x", -10, 10)
+            trial.suggest_int("y", 1, 5)
+            raise KeyboardInterrupt
+        return _objective(trial)
+
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    with pytest.raises(KeyboardInterrupt):
+        run_study(study, interrupted_objective, n_trials=15)
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    run_study(study, interrupted_objective, n_trials=15)
+    assert study.trials[5].user_attrs["crashed"] is True
+    assert study.trials[6].params == study.trials[5].params
+    assert _finished(study) == _finished(uninterrupted)
+
+
+def test_open_study_rejects_a_minimizing_study(tmp_path: Path) -> None:
+    """A loaded study that minimizes would rank the trials the wrong way round."""
+    study_path = tmp_path / "toy_v2.db"
+    optuna.create_study(
+        study_name=study_path.stem,
+        storage=f"sqlite:///{study_path}",
+        direction="minimize",
+    )
+    with pytest.raises(ValueError, match="does not maximize"):
+        open_study(study_path)
+
+
+def test_open_study_rejects_a_missing_folder(tmp_path: Path) -> None:
+    """A missing folder fails with a clear error instead of a SQLite one."""
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        open_study(tmp_path / "missing" / "toy_v2.db")
