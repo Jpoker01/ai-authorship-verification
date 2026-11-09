@@ -102,7 +102,13 @@ def open_study(
     )
     if study.direction != StudyDirection.MAXIMIZE:
         raise ValueError(f"Study {study_path.stem} does not maximize.")
+
     stored_seed = study.user_attrs.get("seed")
+    if stored_seed is None:
+        study.set_user_attr("seed", seed)
+    elif stored_seed != seed:
+        raise ValueError(
+            f"Seed {seed} differs from the stored seed {stored_seed}.")
 
     # one process per study, so a trial still running at open is a crashed one
     study_id = storage.get_study_id_from_name(study_path.stem)
