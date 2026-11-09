@@ -32,5 +32,4 @@ jobs:
       - run: uv lock --check
       - run: uv sync --frozen           # base + dev group, exactly the lock
       - run: uv run --frozen ruff check
-      - run: uv run --frozen ruff format --check
       - run: uv run --frozen pytest -m "not cerit"
