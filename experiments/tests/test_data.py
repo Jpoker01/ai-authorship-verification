@@ -271,7 +271,7 @@ def test_build_cleaned_datasets_writes_the_three_files(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "existing_file,", [TRAIN_CLEANED_FILE, VALIDATION_CLEANED_FILE, TEST_CLEANED_FILE]
+    "existing_file", [TRAIN_CLEANED_FILE, VALIDATION_CLEANED_FILE, TEST_CLEANED_FILE]
 )
 def test_build_cleaned_datasets_refuses_before_writing(
     tmp_path: Path, existing_file: str
@@ -289,3 +289,24 @@ def test_build_cleaned_datasets_refuses_before_writing(
     with pytest.raises(FileExistsError):
         build_cleaned_datasets(raw_dir, output_dir, validation_size=3)
     assert sorted(path.name for path in output_dir.iterdir()) == [existing_file]
+
+
+@pytest.mark.parametrize(
+    "missing_file",
+    [TRAIN_PAIRS_FILE, TRAIN_TRUTH_FILE, TEST_PAIRS_FILE, TEST_TRUTH_FILE],
+)
+def test_build_cleaned_datasets_needs_all_raw_files(
+    tmp_path: Path, missing_file: str
+) -> None:
+    """A missing raw file stops the build before the output folder is even created."""
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    output_dir = tmp_path / "processed"
+    _write_raw_pan(raw_dir / TRAIN_PAIRS_FILE, raw_dir / TRAIN_TRUTH_FILE, n_pairs=10)
+    _write_raw_pan(
+        raw_dir / TEST_PAIRS_FILE, raw_dir / TEST_TRUTH_FILE, n_pairs=4, id_prefix="t"
+    )
+    (raw_dir / missing_file).unlink()
+    with pytest.raises(FileNotFoundError, match=missing_file):
+        build_cleaned_datasets(raw_dir, output_dir, validation_size=3)
+    assert not output_dir.exists()
