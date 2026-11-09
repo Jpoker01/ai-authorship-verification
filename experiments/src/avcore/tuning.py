@@ -137,11 +137,10 @@ def open_study(
 def _raise_if_too_many_failures(study: optuna.Study, n_trials: int) -> None:
     """Raise when n_trials trials failed without a crash - the study can not finish."""
     failed_trials = study.get_trials(deepcopy=False, states=(TrialState.FAIL,))
-    failures = [trial for trial in failed_trials if
-                not trial.user_attrs.get("crashed")]
+    failures = [trial for trial in failed_trials if not trial.user_attrs.get("crashed")]
     if len(failures) >= n_trials:
         raise RuntimeError(
-            f"Study {study.study_name}: {len(failures)} trials failed without a crash."
+            f"Study {study.study_name}: {len(failures)} trials failed without a crash.",
         )
 
 
@@ -167,6 +166,7 @@ def run_study(
     # optimize would start one more trial before the callback stops it
     if len(finished_trials) >= n_trials:
         return
+    _raise_if_too_many_failures(study, n_trials)
 
     # used only to store the correct slot number in optuna database
     def objective_with_position(trial: optuna.Trial) -> float:
@@ -179,6 +179,10 @@ def run_study(
             trial.set_user_attr("crashed", True)  # anything else: mark it as a crash
             raise
 
+    # without it, a search space that always runs out of memory loops forever
+    def stop_after_failed_trials(study: optuna.Study, trial: FrozenTrial) -> None:
+        _raise_if_too_many_failures(study, n_trials)
+
     study.optimize(
         objective_with_position,
         n_jobs=1,
@@ -186,7 +190,6 @@ def run_study(
         callbacks=[
             MaxTrialsCallback(n_trials, states=FINISHED_STATES),
             _reseed_sampler,
+            stop_after_failed_trials,
         ],
     )
-
-
