@@ -59,6 +59,11 @@ def test_open_study_names_the_study_after_the_file_and_maximizes(
     assert study.study_name == "toy_v2"
     assert study.direction == optuna.study.StudyDirection.MAXIMIZE
 
+def test_open_study_rejects_a_relative_path() -> None:
+    """A relative path would create another study in another working directory."""
+    with pytest.raises(ValueError, match="not an absolute path"):
+        open_study(Path("toy_v2.db"))
+
 def test_open_study_rejects_another_seed(tmp_path: Path) -> None:
     """The seed stored on creation cannot be changed on a later open."""
     open_study(tmp_path / "toy_v2.db")
