@@ -218,3 +218,40 @@ def test_open_study_rejects_a_missing_folder(tmp_path: Path) -> None:
     """A missing folder fails with a clear error instead of a SQLite one."""
     with pytest.raises(FileNotFoundError, match="does not exist"):
         open_study(tmp_path / "missing" / "toy_v2.db")
+
+def test_run_study_stops_after_n_trials_failed_trials(tmp_path: Path) -> None:
+    """Failed trials stop the study at n_trials, also when it is run again."""
+
+    def failing_objective(trial: optuna.Trial) -> float:
+        if trial.number < 10:
+            raise MemoryError
+        return _objective(trial)
+
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    with pytest.raises(RuntimeError, match="^Study toy_v2: 3 trials failed"):
+        run_study(study, failing_objective, n_trials=3, catch=(MemoryError,))
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    with pytest.raises(RuntimeError, match="^Study toy_v2: 3 trials failed"):
+        run_study(study, failing_objective, n_trials=3, catch=(MemoryError,))
+    assert [trial.state for trial in study.trials] == [TrialState.FAIL] * 3
+
+
+def test_only_caught_errors_count_as_failed_trials(tmp_path: Path) -> None:
+    """Two crashes, one caught error and two pruned trials stay below the limit of 3."""
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    _crash_mid_trial(study)
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    _crash_mid_trial(study)
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    calls = []
+
+    def objective_failing_then_pruned(trial: optuna.Trial) -> float:
+        calls.append(trial.number)
+        if len(calls) == 1:
+            raise MemoryError
+        if len(calls) <= 3:
+            raise optuna.TrialPruned()
+        return _objective(trial)
+
+    run_study(study, objective_failing_then_pruned, n_trials=3, catch=(MemoryError,))
+    assert len(_finished(study)) == 3
