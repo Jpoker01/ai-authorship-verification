@@ -17,7 +17,13 @@ from avcore.data import RANDOM_STATE
 
 N_TRIALS = 30
 FINISHED_STATES = (TrialState.COMPLETE, TrialState.PRUNED)
-NOT_FAILED_STATES = tuple(state for state in TrialState if state != TrialState.FAIL)
+NOT_FAILED_STATES = (
+    TrialState.RUNNING,
+    TrialState.COMPLETE,
+    TrialState.PRUNED,
+    TrialState.WAITING,
+)
+
 
 class _StudyWithoutFailedTrials:
     """Read-only view of a study that hides its failed trials from a pruner."""
@@ -35,6 +41,7 @@ class _StudyWithoutFailedTrials:
     ) -> list[FrozenTrial]:
         if states is None:
             states = NOT_FAILED_STATES
+        # get all trials that are not FAILED
         return self._study.get_trials(deepcopy=deepcopy, states=states)
 
 
@@ -54,9 +61,11 @@ class IgnoreFailedTrialsPruner(BasePruner):
 
 def _position(study: optuna.Study) -> int:
     """Count the trials that are not crashes - the position of the next trial."""
-    trials = study.get_trials(deepcopy=False)
-    crashed_trials = [trial for trial in trials if trial.user_attrs.get("crashed")]
-    return len(trials) - len(crashed_trials)
+    ended_trials = study.get_trials(deepcopy=False, states=ENDED_STATES)
+    crashed_trials = [
+        trial for trial in ended_trials if trial.user_attrs.get("crashed")
+    ]
+    return len(ended_trials) - len(crashed_trials)
 
 
 def _reseed_sampler(study: optuna.Study, trial: FrozenTrial | None = None) -> None:
@@ -106,8 +115,7 @@ def open_study(
     if stored_seed is None:
         study.set_user_attr("seed", seed)
     elif stored_seed != seed:
-        raise ValueError(
-            f"Seed {seed} differs from the stored seed {stored_seed}.")
+        raise ValueError(f"Seed {seed} differs from the stored seed {stored_seed}.")
 
     # one process per study, so a trial still running at open is a crashed one
     study_id = storage.get_study_id_from_name(study_path.stem)
@@ -123,10 +131,10 @@ def open_study(
 
 
 def run_study(
-        study: optuna.Study,
-        objective: Callable[[optuna.Trial], float],
-        n_trials: int = N_TRIALS,
-        catch: tuple[type[Exception], ...] = (),
+    study: optuna.Study,
+    objective: Callable[[optuna.Trial], float],
+    n_trials: int = N_TRIALS,
+    catch: tuple[type[Exception], ...] = (),
 ) -> None:
     """Run trials one at a time until the study has n_trials finished trials.
 
@@ -141,9 +149,9 @@ def run_study(
     if len(finished_trials) >= n_trials:
         return
 
+    # used only to store the correct slot number in optuna database
     def objective_with_position(trial: optuna.Trial) -> float:
-        # the running trial is counted too, so its own position is one lower
-        trial.set_user_attr("position", _position(study) - 1)
+        trial.set_user_attr("position", _position(study))
         return objective(trial)
 
     study.optimize(
