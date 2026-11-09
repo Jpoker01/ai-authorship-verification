@@ -183,6 +183,8 @@ def load_pan_pairs(
                 raise ValueError(
                     f"line {line_number}: id {pair_id} does not match truth id {truth['id']}"
                 )
+            if len(texts) != 2:
+                raise ValueError(f"line {line_number}: {len(texts)} texts instead of 2")
             if not isinstance(texts, list) or len(texts) != 2:
                 raise ValueError(f"line {line_number}: {len(texts)} texts instead of 2")
             records.append({"id": pair_id, "pair": texts, "same": truth["same"]})
