@@ -240,21 +240,34 @@ def test_build_cleaned_datasets_writes_the_three_files(tmp_path: Path) -> None:
     """Test and train are loaded cleaned, train is split, and the 3 files hold the right rows."""
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
-    output_dir = tmp_path / "processed"
+    # nested, so the missing parent folder is created too
+    output_dir = tmp_path / "data" / "processed"
     _write_raw_pan(raw_dir / TRAIN_PAIRS_FILE, raw_dir / TRAIN_TRUTH_FILE, n_pairs=10)
     _write_raw_pan(
         raw_dir / TEST_PAIRS_FILE, raw_dir / TEST_TRUTH_FILE, n_pairs=4, id_prefix="t"
     )
-    counts = build_cleaned_datasets(raw_dir, output_dir, validation_size=3)
+    counts = build_cleaned_datasets(
+        raw_dir,
+        output_dir,
+        validation_size=3,
+        random_state=0,
+        workers=2,
+    )
     assert counts == DatasetCounts(train=7, validation=3, test=4)
     train_df = read_jsonl(output_dir / TRAIN_CLEANED_FILE)
     validation_df = read_jsonl(output_dir / VALIDATION_CLEANED_FILE)
-    test_df = read_jsonl(output_dir / TEST_CLEANED_FILE)
-    assert train_df["id"].tolist() == ["p0", "p7", "p2", "p9", "p4", "p3", "p6"]
-    assert validation_df["id"].tolist() == ["p8", "p1", "p5"]
-    assert test_df["id"].tolist() == ["t0", "t1", "t2", "t3"]
-    assert train_df["pair"][0] == ["t0a", "t0b"]
-    assert test_df["pair"][0] == ["t0a", "t0b"]
+    assert train_df["id"].tolist() == ["p9", "p1", "p6", "p7", "p3", "p0", "p5"]
+    assert train_df["same"].tolist() == [False, False, True, False, False, True, False]
+    assert train_df["pair"][0] == ["t9a", "t9b"]
+    assert validation_df["id"].tolist() == ["p2", "p8", "p4"]
+    assert validation_df["same"].tolist() == [True, True, True]
+    # exact bytes pin the ids, the cleaned texts, the labels as true / false and the format
+    assert (output_dir / TEST_CLEANED_FILE).read_bytes() == (
+        b'{"id": "t0", "pair": ["t0a", "t0b"], "same": true}\n'
+        b'{"id": "t1", "pair": ["t1a", "t1b"], "same": false}\n'
+        b'{"id": "t2", "pair": ["t2a", "t2b"], "same": true}\n'
+        b'{"id": "t3", "pair": ["t3a", "t3b"], "same": false}\n'
+    )
 
 
 def test_build_cleaned_datasets_refuses_before_writing(tmp_path: Path) -> None:
