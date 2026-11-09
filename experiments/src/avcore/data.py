@@ -183,7 +183,7 @@ def load_pan_pairs(
                 raise ValueError(
                     f"line {line_number}: id {pair_id} does not match truth id {truth['id']}"
                 )
-            if len(texts) != 2:
+            if not isinstance(texts, list) or len(texts) != 2:
                 raise ValueError(f"line {line_number}: {len(texts)} texts instead of 2")
             records.append({"id": pair_id, "pair": texts, "same": truth["same"]})
     return pd.DataFrame(records, columns=PAIR_COLUMNS)
@@ -248,12 +248,22 @@ def build_cleaned_datasets(
         The number of pairs written to each file.
 
     Raises:
+        FileNotFoundError: If any of the 4 raw files is missing.
         FileExistsError: If any of the cleaned files already exists.
     """
     train_path = output_dir / TRAIN_CLEANED_FILE
     validation_path = output_dir / VALIDATION_CLEANED_FILE
     test_path = output_dir / TEST_CLEANED_FILE
     # checked before any work, so a second run never leaves a half-built set
+    raw_paths = [
+        raw_dir / TRAIN_PAIRS_FILE,
+        raw_dir / TRAIN_TRUTH_FILE,
+        raw_dir / TEST_PAIRS_FILE,
+        raw_dir / TEST_TRUTH_FILE,
+    ]
+    for path in raw_paths:
+        if not path.exists():
+            raise FileNotFoundError(f"{path} does not exist.")
     for path in (train_path, validation_path, test_path):
         if path.exists():
             raise FileExistsError(f"{path} already exists.")
