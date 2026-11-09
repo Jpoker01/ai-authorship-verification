@@ -143,7 +143,7 @@ def test_load_pan_pairs_cleans_both_texts(tmp_path: Path) -> None:
     ],
 )
 def test_load_pan_pairs_rejects_misaligned_truth(
-    tmp: Path,
+    tmp_path: Path,
     truth_records: list[dict],
     error_message: str,
 ) -> None:
@@ -216,7 +216,7 @@ def test_write_pairs_jsonl_refuses_existing_file(tmp_path: Path) -> None:
     pairs_df = pd.DataFrame({"id": ["a"], "pair": [["x", "y"]], "same": [True]})
     with pytest.raises(FileExistsError):
         write_pairs_jsonl(pairs_df, path)
-    assert path.read_bytes() == "old content\n"
+    assert path.read_text(encoding="utf-8") == "old content\n"
 
 
 def test_write_then_read_round_trip(tmp_path: Path) -> None:
