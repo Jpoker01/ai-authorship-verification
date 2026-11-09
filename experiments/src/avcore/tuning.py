@@ -64,3 +64,54 @@ def _reseed_sampler(study: optuna.Study, trial: FrozenTrial | None = None) -> No
     """Create the sampler for the next trial from the stored seed and the position."""
     seed = study.user_attrs["seed"] + _position(study)
     study.sampler = optuna.samplers.TPESampler(seed=seed)
+
+
+def open_study(
+    study_path: Path,
+    pruner: BasePruner | None = None,
+    seed: int = RANDOM_STATE,
+) -> optuna.Study:
+    """Create or load the study stored in study_path and fail its crashed trials.
+
+    Args:
+        study_path: Absolute path of the SQLite file; its stem is the study name.
+        pruner: Pruner of the study; failed trials are hidden from it.
+        seed: Seed of the first trial, stored in the study on creation.
+
+    Returns:
+        The study, maximizing, with the sampler for its next trial.
+
+    Raises:
+        ValueError: If study_path is relative, the loaded study does not
+            maximize, or seed differs from the stored one.
+        FileNotFoundError: If the folder of study_path does not exist.
+    """
+    if not study_path.is_absolute():
+        raise ValueError(f"{study_path} is not an absolute path.")
+    if not study_path.parent.is_dir():
+        raise FileNotFoundError(f"{study_path.parent} does not exist.")
+    if pruner is not None:
+        pruner = IgnoreFailedTrialsPruner(pruner)
+    storage = optuna.storages.RDBStorage(f"sqlite:///{study_path}")
+    study = optuna.create_study(
+        study_name=study_path.stem,
+        storage=storage,
+        pruner=pruner,
+        direction="maximize",
+        load_if_exists=True,
+    )
+    if study.direction != StudyDirection.MAXIMIZE:
+        raise ValueError(f"Study {study_path.stem} does not maximize.")
+    stored_seed = study.user_attrs.get("seed")
+
+    # one process per study, so a trial still running at open is a crashed one
+    study_id = storage.get_study_id_from_name(study_path.stem)
+    for trial in study.get_trials(deepcopy=False, states=(TrialState.RUNNING,)):
+        trial_id = storage.get_trial_id_from_study_id_trial_number(
+            study_id,
+            trial.number,
+        )
+        storage.set_trial_user_attr(trial_id, "crashed", True)
+        study.tell(trial.number, state=TrialState.FAIL)
+    _reseed_sampler(study)
+    return study
