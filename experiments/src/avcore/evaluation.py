@@ -65,7 +65,7 @@ def evaluate_results(
         recall=_to_percent(
             recall_score(y_true, y_pred, average=average, zero_division=0)
         ),
-        f1=_to_percent(f1_score(y_true, y_pred, average=average, zero_division=0))
+        f1=_to_percent(f1_score(y_true, y_pred, average=average, zero_division=0)),
     )
 
 
@@ -138,6 +138,7 @@ def select_best_threshold(threshold_results_df: pd.DataFrame) -> pd.Series:
         ["f1_unrounded", "threshold"],
         ascending=[False, True],
         kind="stable",
-        key=lambda column: column.round(12)
+        key=lambda column: column.round(12),
     )
+
     return ranked_df.iloc[0]
