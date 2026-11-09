@@ -61,7 +61,7 @@ class IgnoreFailedTrialsPruner(BasePruner):
 
 
 def _position(study: optuna.Study) -> int:
-    """Count the trials that are not crashes - the position of the next trial."""
+    """Count the ended trials that are not crashes - the position of the next trial."""
     ended_trials = study.get_trials(deepcopy=False, states=ENDED_STATES)
     crashed_trials = [
         trial for trial in ended_trials if trial.user_attrs.get("crashed")
@@ -153,7 +153,13 @@ def run_study(
     # used only to store the correct slot number in optuna database
     def objective_with_position(trial: optuna.Trial) -> float:
         trial.set_user_attr("position", _position(study))
-        return objective(trial)
+        try:
+            return objective(trial)  # run the training as before
+        except (optuna.TrialPruned, *catch):
+            raise  # pruned, or an error you listed in catch: unchanged
+        except BaseException:
+            trial.set_user_attr("crashed", True)  # anything else: mark it as a crash
+            raise
 
     study.optimize(
         objective_with_position,
