@@ -134,6 +134,17 @@ def open_study(
     return study
 
 
+def _raise_if_too_many_failures(study: optuna.Study, n_trials: int) -> None:
+    """Raise when n_trials trials failed without a crash - the study can not finish."""
+    failed_trials = study.get_trials(deepcopy=False, states=(TrialState.FAIL,))
+    failures = [trial for trial in failed_trials if
+                not trial.user_attrs.get("crashed")]
+    if len(failures) >= n_trials:
+        raise RuntimeError(
+            f"Study {study.study_name}: {len(failures)} trials failed without a crash."
+        )
+
+
 def run_study(
     study: optuna.Study,
     objective: Callable[[optuna.Trial], float],
@@ -174,12 +185,4 @@ def run_study(
         ],
     )
 
-def _raise_if_too_many_failures(study: optuna.Study, n_trials: int) -> None:
-    """Raise when n_trials trials failed without a crash - the study can not finish."""
-    failed_trials = study.get_trials(deepcopy=False, states=(TrialState.FAIL,))
-    failures = [trial for trial in failed_trials if
-                not trial.user_attrs.get("crashed")]
-    if len(failures) >= n_trials:
-        raise RuntimeError(
-            f"Study {study.study_name}: {len(failures)} trials failed without a crash."
-        )
+
