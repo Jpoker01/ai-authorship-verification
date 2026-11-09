@@ -19,7 +19,6 @@ N_TRIALS = 30
 FINISHED_STATES = (TrialState.COMPLETE, TrialState.PRUNED)
 NOT_FAILED_STATES = tuple(state for state in TrialState if state != TrialState.FAIL)
 
-
 class _StudyWithoutFailedTrials:
     """Read-only view of a study that hides its failed trials from a pruner."""
 
@@ -137,6 +136,10 @@ def run_study(
         n_trials: Number of complete + pruned trials to reach.
         catch: Exceptions that fail one trial and let the study continue.
     """
+    finished_trials = study.get_trials(deepcopy=False, states=FINISHED_STATES)
+    # optimize would start one more trial before the callback stops it
+    if len(finished_trials) >= n_trials:
+        return
 
     def objective_with_position(trial: optuna.Trial) -> float:
         # the running trial is counted too, so its own position is one lower
