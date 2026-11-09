@@ -34,14 +34,14 @@ def _write_raw_pan(
 ) -> None:
     """Writes a synthetic raw PAN pairs file and its truth file, with the extra columns.
 
-    Pair i has the id f"{id_prefix}{i}", the texts "<b>t</b>{i}a" and "t_{i}b"
+    Pair i has the id f"{id_prefix}{i}", the texts "<b>t</b>{i}a" and "t_{i}b’"
     (cleaned "t{i}a" and "t{i}b") and is a same-author pair when i is even.
     """
     pairs = [
         {
             "id": f"{id_prefix}{i}",
             "fandoms": ["f1", "f2"],
-            "pair": [f"<b>t</b>{i}a", f"t_{i}b"],
+            "pair": [f"<b>t</b>{i}a", f"t_{i}b’"],
         }
         for i in range(n_pairs)
     ]
@@ -92,7 +92,7 @@ def test_load_pan_pairs_keeps_raw_texts_and_matches_labels_by_line(
     assert list(pairs_df.columns) == PAIR_COLUMNS
     assert pairs_df["id"].tolist() == [f"p{i}" for i in range(10)]
     assert pairs_df["same"].tolist() == [i % 2 == 0 for i in range(10)]
-    assert pairs_df["pair"][3] == ["<b>t</b>3a", "t_3b"]
+    assert pairs_df["pair"][3] == ["<b>t</b>3a", "t_3b’"]
 
 
 def test_load_pan_pairs_repeated_id_keeps_one_row_per_line(tmp_path: Path) -> None:
@@ -156,13 +156,16 @@ def test_load_pan_pairs_rejects_misaligned_truth(
         load_pan_pairs(pairs_path, truth_path)
 
 
-def test_load_pan_pairs_rejects_three_texts(tmp_path: Path) -> None:
-    """A pair with 3 texts stops the load with its line number."""
+@pytest.mark.parametrize("texts", [["a", "b", "c"], ["a"], "ab"])
+def test_load_pan_pairs_rejects_three_texts(
+    tmp_path: Path, texts: list[str] | str
+) -> None:
+    """3 texts, 1 text or a plain string instead of a list stops the load with its line number."""
     pairs_path = tmp_path / "pairs.jsonl"
     truth_path = tmp_path / "truth.jsonl"
-    _write_jsonl(pairs_path, [{"id": "p0", "pair": ["a", "b", "c"]}])
+    _write_jsonl(pairs_path, [{"id": "p0", "pair": texts}])
     _write_jsonl(truth_path, [{"id": "p0", "same": True}])
-    with pytest.raises(ValueError, match="line 1: 3 texts instead of 2"):
+    with pytest.raises(ValueError, match="line 1: pair is not a list of 2 texts"):
         load_pan_pairs(pairs_path, truth_path)
 
 
