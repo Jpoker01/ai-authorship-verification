@@ -318,3 +318,17 @@ def test_connect_tracking_loads_the_env_file_over_the_shell(tmp_path, monkeypatc
     tracking.connect_tracking(env_path, tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}")
     assert os.environ["DATABRICKS_TOKEN"] == "fresh"
     assert os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] == "true"
+
+def test_connect_tracking_requires_the_env_file(tmp_path):
+    """A missing .env file raises instead of loading nothing."""
+    with pytest.raises(FileNotFoundError):
+        tracking.connect_tracking(
+            tmp_path / ".env", tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}"
+        )
+
+def test_write_run_files_rejects_a_relative_folder(tmp_path, context, monkeypatch):
+    """A relative run folder raises and nothing is written into the current folder."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="absolute"):
+        _write(Path("run_v2"), context)
+    assert list(tmp_path.iterdir()) == []
