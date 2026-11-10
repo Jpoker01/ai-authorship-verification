@@ -40,7 +40,7 @@ PACKAGES = [
 DATABRICKS_VARIABLES = ["DATABRICKS_HOST", "DATABRICKS_TOKEN"]
 PACKAGE_DIR = Path(__file__).resolve().parent
 
-# Databricks limits keys and param values to 250 characters; the local stores accept more
+# MLflow limits keys to 250 characters; values to 250 as our own guard - no text in a param
 MAX_KEY_LENGTH = 250
 MAX_PARAM_LENGTH = 250
 # a PAN text has about 21 000 characters, ids and hyperparameter values far fewer
