@@ -93,3 +93,27 @@ def _cgroup_value(name: str) -> str:
     """Return a cgroup v2 limit of this container (cpu.max, memory.max), or "none"."""
     path = Path("/sys/fs/cgroup") / name
     return path.read_text(encoding="utf-8").strip() if path.is_file() else "none"
+
+def _gpu_params() -> dict[str, str]:
+    """Return CUDA, cuDNN and GPU of torch, "none" without torch or without a GPU."""
+    params = {
+        "cuda_version": "none",
+        "cudnn_version": "none",
+        "gpu_count": "0",
+        "gpu_name": "none",
+        "gpu_vram_gb": "none",
+    }
+    # the default group has no torch, the traditional notebooks run without it
+    if importlib.util.find_spec("torch") is None:
+        return params
+    import torch
+
+    params["cuda_version"] = str(torch.version.cuda)
+    if torch.cuda.is_available():
+        properties = torch.cuda.get_device_properties(0)
+        params["cudnn_version"] = str(torch.backends.cudnn.version())
+        params["gpu_count"] = str(torch.cuda.device_count())
+        params["gpu_name"] = properties.name
+        params["gpu_vram_gb"] = str(
+            round(properties.total_memory / 1024 ** 3, 2))
+    return params
