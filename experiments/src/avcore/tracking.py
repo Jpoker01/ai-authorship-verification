@@ -192,13 +192,17 @@ def _check_file_name(name: str) -> None:
         raise ValueError(f"File name {name!r} is not allowed.")
 
 def _is_plain_cell(value: object) -> bool:
-    """Return True for a number, a bool or a short string - never a list or a long text."""
+    """Return True for a number, a bool, a time, a missing value or a short string."""
     if isinstance(value, str):
         return len(value) <= MAX_TABLE_TEXT_LENGTH
     # bool is a subclass of int, so True / False count as numbers too
     is_python_number = isinstance(value, (int, float))
-    is_numpy_number = isinstance(value, np.generic)
-    return is_python_number or is_numpy_number
+    # not np.generic - np.bytes_ is one too and would skip the length check
+    is_numpy_number = isinstance(value, (np.number, np.bool_))
+    # an Optuna trials table holds start / end times and None for unfinished values
+    is_time = isinstance(value, (pd.Timestamp, pd.Timedelta))
+    is_missing = value is None or value is pd.NA or value is pd.NaT
+    return is_python_number or is_numpy_number or is_time or is_missing
 
 def _check_table(name: str, table_df: pd.DataFrame) -> None:
     """Raise ValueError for a bad file name,
