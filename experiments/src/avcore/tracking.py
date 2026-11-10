@@ -1,0 +1,58 @@
+"""Run records of the v2 experiments - context, local result files and their MLflow upload."""
+
+import hashlib
+import importlib.metadata
+import importlib.util
+import os
+
+import json
+import math
+
+import os
+import platform
+import re
+import subprocess
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+import mlflow
+import numpy as np
+import pandas as pd
+from dotenv import load_dotenv
+from matplotlib.figure import Figure
+
+EXPERIMENT_NAME = "/Shared/JP_authorship_verification_dt_v2"
+SMOKE_EXPERIMENT_NAME = f"{EXPERIMENT_NAME}_smoke"
+
+# 0 = different author, 1 = same author; score: higher = more likely the same author
+PREDICTION_COLUMNS = ["id", "same", "score", "pred"]
+PREDICTION_TABLES = ["predictions-test", "predictions-validation"]
+PACKAGES = [
+    "scikit-learn",
+    "xgboost",
+    "optuna",
+    "numpy",
+    "pandas",
+    "mlflow",
+    "torch",
+    "transformers",
+]
+DATABRICKS_VARIABLES = ["DATABRICKS_HOST", "DATABRICKS_TOKEN"]
+PACKAGE_DIR = Path(__file__).resolve().parent
+
+# Databricks limits keys and param values to 250 characters; the local stores accept more
+MAX_KEY_LENGTH = 250
+MAX_PARAM_LENGTH = 250
+# a PAN text has about 21 000 characters, ids and hyperparameter values far fewer
+MAX_TABLE_TEXT_LENGTH = 100
+_KEY_PATTERN = re.compile(r"[\w./\- ]+")
+_FILE_NAME_PATTERN = re.compile(r"[\w.-]+")
+
+CONTEXT_FILE = "context.json"
+PACKAGES_FILE = "packages.json"
+PARAMS_FILE = "params.json"
+METRICS_FILE = "metrics.json"
+MANIFEST_FILE = "manifest.json"
+MANIFEST_TAG = "dt.manifest_sha256"
