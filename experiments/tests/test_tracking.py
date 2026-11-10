@@ -177,3 +177,39 @@ def test_write_run_files_refuses_an_existing_folder(tmp_path, context):
     (tmp_path / "run_v2").mkdir()
     with pytest.raises(FileExistsError):
         _write(tmp_path / "run_v2", context)
+
+def test_log_run_files_uploads_the_saved_files(tmp_path, context, experiment):
+    """The run gets the folder name, the context and params, the metrics and every file."""
+    run_dir = tmp_path / "longformer_v2"
+    figure, _ = plt.subplots()
+    _write(run_dir, context, figures={"confusion_matrix-test": figure})
+    run = mlflow.get_run(tracking.log_run_files(run_dir, experiment))
+    assert run.info.run_name == "longformer_v2"
+    assert run.data.params == {"commit": "abc", "lr": "1e-05"}
+    assert run.data.metrics == {"test_f1": 92.38}
+    artifacts = {
+        item.path for item in mlflow.MlflowClient().list_artifacts(run.info.run_id)
+    }
+    assert artifacts == {
+        "context.json",
+        "packages.json",
+        "params.json",
+        "metrics.json",
+        "manifest.json",
+        "predictions-test.csv",
+        "confusion_matrix-test.png",
+    }
+
+
+def test_log_run_files_returns_the_finished_run_on_a_second_call(
+    tmp_path, context, experiment
+):
+    """Uploading the same folder twice gives one run."""
+    run_dir = tmp_path / "longformer_v2"
+    _write(run_dir, context)
+    first_run_id = tracking.log_run_files(run_dir, experiment)
+    assert tracking.log_run_files(run_dir, experiment) == first_run_id
+    assert (
+        len(mlflow.search_runs(experiment_names=[experiment], output_format="list"))
+        == 1
+    )
