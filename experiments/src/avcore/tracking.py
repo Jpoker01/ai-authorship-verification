@@ -191,7 +191,6 @@ def _check_file_name(name: str) -> None:
     if not _FILE_NAME_PATTERN.fullmatch(name):
         raise ValueError(f"File name {name!r} is not allowed.")
 
-
 def _is_plain_cell(value: object) -> bool:
     """Return True for a number, a bool or a short string - never a list or a long text."""
     if isinstance(value, str):
@@ -202,7 +201,9 @@ def _is_plain_cell(value: object) -> bool:
     return is_python_number or is_numpy_number
 
 def _check_table(name: str, table_df: pd.DataFrame) -> None:
-    """Raise ValueError if a table can hold text, or a prediction table is malformed."""
+    """Raise ValueError for a bad file name,
+    a cell that is not a number or a short string, or a bad prediction table.
+    """
     _check_file_name(name)
     for column in table_df.columns:
         cells = [column, *table_df[column].astype(object)]
@@ -336,8 +337,8 @@ def connect_tracking(env_path: Path, tracking_uri: str = "databricks") -> None:
 def log_run_files(run_dir: Path, experiment_name: str) -> str:
     """Upload a folder written by write_run_files as one MLflow run named after the folder.
 
-    A second call for the same folder returns the finished run instead of a new one, so a
-    failed upload is simply repeated.
+    Calling it again for the same folder is safe: a finished upload returns its existing
+    run, a failed one is uploaded again as a new run (e.g. from dt when the Job pod had no network).
 
     Args:
         run_dir: Folder written by write_run_files.
