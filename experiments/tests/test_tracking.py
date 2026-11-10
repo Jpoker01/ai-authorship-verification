@@ -14,6 +14,7 @@ import pytest
 
 from avcore import tracking
 
+
 def _git(repo_dir, *args):
     """Run a git command in a test repo, with a committer name and email."""
     subprocess.run(
