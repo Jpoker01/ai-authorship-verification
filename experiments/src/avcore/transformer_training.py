@@ -68,3 +68,56 @@ def checkpoint_key_for(trial: optuna.Trial) -> str:
         raise ValueError("The trial has no position - start the study with tuning.run_study.")
     # trial.number changes when a crashed trial is repeated, the position does not
     return f"{trial.study.study_name}-position-{trial.user_attrs['position']}"
+
+def _encode(
+    tokenizer: PreTrainedTokenizerBase,
+    pairs: Sequence[Sequence[str]],
+    device: torch.device,
+) -> dict[str, torch.Tensor]:
+    """Tokenize text pairs as one padded batch, truncated to MAX_LENGTH tokens."""
+    encoding = tokenizer(
+        [pair[0] for pair in pairs],
+        [pair[1] for pair in pairs],
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=MAX_LENGTH,
+    )
+    return encoding.to(device)
+
+def score_pairs(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    pairs_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Score every pair alone, as v1 did, without gradients.
+
+    Args:
+        model: Classifier with 2 labels, 0 = different author, 1 = same author.
+        tokenizer: Tokenizer of the model.
+        pairs_df: Rows with id, same and pair (the two texts).
+
+    Returns:
+        One row per pair, in order, with id, same, score (softmax probability of "same author")
+        and argmax (the label with the higher logit, the v1 pruning prediction).
+    """
+    device = next(model.parameters()).device
+    was_training = model.training
+    model.eval()
+    scores = []
+    argmaxes = []
+    with torch.no_grad():
+        for pair in pairs_df["pair"]:
+            logits = model(**_encode(tokenizer, [pair], device)).logits
+            scores.append(F.softmax(logits, dim=-1)[0, 1].item())
+            argmaxes.append(torch.argmax(logits, dim=-1).item())
+    model.train(was_training)
+    return pd.DataFrame(
+        {
+            "id": pairs_df["id"].to_numpy(),
+            "same": pairs_df["same"].to_numpy(),
+            "score": scores,
+            "argmax": argmaxes,
+        }
+    )
+
