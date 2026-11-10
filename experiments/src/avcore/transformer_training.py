@@ -57,3 +57,14 @@ class TrainingResult:
     epoch_losses: list[float]
     pruning_f1s: list[float]
     validation_scores_df: pd.DataFrame | None
+
+def checkpoint_key_for(trial: optuna.Trial) -> str:
+    """Name the checkpoint of a trial by its study and position, which a repeated trial keeps.
+
+    Raises:
+        ValueError: If the trial has no position, i.e. it was not started by tuning.run_study.
+    """
+    if "position" not in trial.user_attrs:
+        raise ValueError("The trial has no position - start the study with tuning.run_study.")
+    # trial.number changes when a crashed trial is repeated, the position does not
+    return f"{trial.study.study_name}-position-{trial.user_attrs['position']}"
