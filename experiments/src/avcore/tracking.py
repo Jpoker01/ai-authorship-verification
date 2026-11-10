@@ -245,3 +245,66 @@ def _check_metrics(metrics: Mapping[str, float]) -> None:
         is_number = isinstance(value, numbers.Real) and not isinstance(value, bool)
         if not is_number or not math.isfinite(value):
             raise ValueError(f"Metric {key} is not a finite number: {value!r}")
+
+def write_run_files(
+    run_dir: Path,
+    *,
+    context: RunContext,
+    params: Mapping[str, object],
+    metrics: Mapping[str, float],
+    tables: Mapping[str, pd.DataFrame],
+    figures: Mapping[str, Figure],
+) -> None:
+    """Write everything a run reports into a new folder - all checks first, then all files.
+
+    The files go to run_dir.partial, which is renamed to run_dir once complete.
+
+    Args:
+        run_dir: Absolute folder that does not exist yet; its name is the run name and contains "_v2".
+        context: Output of collect_run_context.
+        params: Hyperparameters and settings, at most MAX_PARAM_LENGTH characters each.
+        metrics: Finite numbers.
+        tables: Saved as <name>.csv; prediction tables are PREDICTION_TABLES with PREDICTION_COLUMNS.
+        figures: Saved as <name>.png.
+
+    Raises:
+        FileExistsError: If run_dir or run_dir.partial already exists.
+        ValueError: If any input fails a check (nothing is written then).
+    """
+    if not run_dir.is_absolute() or "_v2" not in run_dir.name:
+        raise ValueError(
+            f"Run folder {run_dir} has to be absolute and contain _v2.")
+    _check_file_name(run_dir.name)
+    _check_params(context, params)
+    _check_metrics(metrics)
+    for name, table_df in tables.items():
+        _check_table(name, table_df)
+    for name in figures:
+        _check_file_name(name)
+    if run_dir.exists():
+        raise FileExistsError(run_dir)
+
+    partial_dir = run_dir.with_name(f"{run_dir.name}.partial")
+    partial_dir.mkdir(parents=True, exist_ok=False)
+    json_files = {
+        CONTEXT_FILE: context.environment,
+        PACKAGES_FILE: context.packages,
+        PARAMS_FILE: {key: str(value) for key, value in params.items()},
+        METRICS_FILE: {key: float(value) for key, value in metrics.items()},
+    }
+    for file_name, content in json_files.items():
+        (partial_dir / file_name).write_text(json.dumps(content, indent=2),
+                                             encoding="utf-8")
+    for name, table_df in tables.items():
+        table_df.to_csv(partial_dir / f"{name}.csv", index=False)
+    for name, figure in figures.items():
+        figure.savefig(partial_dir / f"{name}.png", bbox_inches="tight")
+
+    manifest = {
+        "written_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "files": {path.name: _sha256(path) for path in
+                  sorted(partial_dir.iterdir())},
+    }
+    (partial_dir / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2),
+                                             encoding="utf-8")
+    partial_dir.rename(run_dir)
