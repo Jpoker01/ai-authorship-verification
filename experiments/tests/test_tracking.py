@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest import mock
 
 import matplotlib
-from mlflow import set_tracking_uri
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -252,3 +251,13 @@ def test_connect_tracking_requires_databricks_credentials(tmp_path, monkeypatch)
     env_path.write_text("DATABRICKS_HOST=https://example.invalid\n")
     with pytest.raises(RuntimeError, match="DATABRICKS_TOKEN"):
         tracking.connect_tracking(env_path)
+
+def test_env_example_lists_the_required_variables():
+    """The .env template lists exactly the credentials that connect_tracking requires."""
+    lines = (
+        (Path(__file__).parents[1] / ".env.example")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    names = [line.split("=")[0] for line in lines if line and not line.startswith("#")]
+    assert names == tracking.DATABRICKS_VARIABLES
