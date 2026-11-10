@@ -308,3 +308,27 @@ def write_run_files(
     (partial_dir / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2),
                                              encoding="utf-8")
     partial_dir.rename(run_dir)
+
+def connect_tracking(env_path: Path, tracking_uri: str = "databricks") -> None:
+    """Point MLflow at the tracking server, with the credentials from the .env file.
+
+    Args:
+        env_path: The .env file with DATABRICKS_HOST and DATABRICKS_TOKEN.
+        tracking_uri: "databricks", or a local URI in the tests.
+
+    Raises:
+        FileNotFoundError: If env_path does not exist.
+        RuntimeError: If tracking_uri is "databricks" and a credential is missing.
+    """
+    if not env_path.is_file():
+        raise FileNotFoundError(env_path)
+    # the .env file wins over a stale variable exported in the shell
+    load_dotenv(env_path, override=True)
+    if tracking_uri == "databricks":
+        missing = [name for name in DATABRICKS_VARIABLES if
+                   not os.environ.get(name)]
+        if missing:
+            raise RuntimeError(f"Missing in {env_path.name}: {missing}")
+    # otherwise every run prints its URL, with the workspace host
+    os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] = "true"
+    mlflow.set_tracking_uri(tracking_uri)
