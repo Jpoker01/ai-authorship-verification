@@ -145,3 +145,15 @@ def _describe_run(
         "train_ids_sha256": _sha256("\n".join(train_df["id"].astype(str))),
         "trial_params": {} if trial is None else dict(trial.params),
     }
+
+def _save_checkpoint(checkpoint_dir: Path, state: dict) -> None:
+    """Write the state to a temporary file, then replace the old checkpoint in one step."""
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    partial_path = checkpoint_dir / f"{CHECKPOINT_FILE}.{os.getpid()}.partial"
+    with partial_path.open("wb") as file:
+        torch.save(state, file)
+        file.flush()
+        # on the disk before the rename, also when the node crashes
+        os.fsync(file.fileno())
+    # a kill during torch.save leaves the previous checkpoint intact
+    os.replace(partial_path, checkpoint_dir / CHECKPOINT_FILE)
