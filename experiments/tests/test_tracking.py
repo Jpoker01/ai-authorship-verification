@@ -89,3 +89,37 @@ def _write(run_dir, context, **changes):
         "figures": {},
     }
     tracking.write_run_files(run_dir, context=context, **{**arguments, **changes})
+
+def test_collect_run_context_records_commit_lock_and_data_hashes(project_dir, tmp_path):
+    """The context holds HEAD, the LF sha256 of uv.lock and the sha256 of each data file."""
+    data_path = tmp_path / "train.jsonl"
+    data_path.write_text('{"id": "a"}\n')
+    run_context = tracking.collect_run_context(
+        project_dir, [data_path], package_dir=project_dir / "src" / "avcore"
+    )
+    head = subprocess.run(
+        ["git", "-C", str(project_dir), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert run_context.environment["commit"] == head
+    assert run_context.environment["uv_lock_sha256"] == hashlib.sha256(b"lock\n").hexdigest()
+    assert (
+        run_context.environment["data_sha256.train.jsonl"]
+        == hashlib.sha256(b'{"id": "a"}\n').hexdigest()
+    )
+
+@pytest.mark.parametrize("change", ["modified", "untracked_hidden", "unpushed"])
+def test_collect_run_context_rejects_an_unclean_repo(project_dir, change):
+    """A modified file, a hidden untracked file or an unpushed commit stop the run."""
+    if change == "modified":
+        (project_dir / "uv.lock").write_text("changed\n")
+    elif change == "untracked_hidden":
+        _git(project_dir, "config", "status.showUntrackedFiles", "no")
+        (project_dir / "new_module.py").write_text("x = 1\n")
+    else:
+        _git(project_dir, "commit", "-q", "--allow-empty", "-m", "local only")
+    with pytest.raises(RuntimeError):
+        tracking.collect_run_context(
+            project_dir, [], package_dir=project_dir / "src" / "avcore"
+        )
