@@ -5,6 +5,7 @@ import importlib.metadata
 import importlib.util
 import json
 import math
+import numbers
 import os
 import platform
 import re
@@ -59,11 +60,11 @@ class RunContext:
     """Environment of a run.
 
     Attributes:
-        params: Commit, hashes, versions and hardware, logged as MLflow params.
+        environment: Commit, hashes, versions and hardware, logged as MLflow params.
         packages: Every installed distribution with its version, saved as a file.
     """
 
-    params: dict[str, str]
+    environment: dict[str, str]
     packages: dict[str, str]
 
 def _git(project_dir: Path, *args: str) -> str:
@@ -159,7 +160,7 @@ def collect_run_context(
 
     # the same lock hashes the same on Windows (CRLF checkout) and Linux
     lock_bytes = (project_dir / "uv.lock").read_bytes().replace(b"\r\n", b"\n")
-    params = {
+    environment = {
         "commit": _git(project_dir, "rev-parse", "HEAD"),
         "uv_lock_sha256": hashlib.sha256(lock_bytes).hexdigest(),
         "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -174,7 +175,7 @@ def collect_run_context(
         **_gpu_params(),
     }
     packages = {dist.metadata["Name"]: dist.version for dist in importlib.metadata.distributions()}
-    return RunContext(params=params, packages=dict(sorted(packages.items())))
+    return RunContext(environment=environment, packages=dict(sorted(packages.items())))
 
 def _check_key(kind: str, key: object) -> None:
     """Raise ValueError if a key is not a valid MLflow / Databricks key."""
@@ -224,3 +225,23 @@ def _check_predictions(name: str, predictions_df: pd.DataFrame) -> None:
     if not np.isfinite(
             predictions_df["score"].to_numpy(dtype=float)).all():
         raise ValueError(f"Table {name} has a score that is not finite.")
+
+def _check_params(context: RunContext, params: Mapping[str, object]) -> None:
+    """Raise ValueError if a param repeats a context key, has a bad key or is too long."""
+    overlap = sorted(set(context.environment) & set(params))
+    if overlap:
+        raise ValueError(f"Params repeat context keys: {overlap}")
+    for key, value in {**context.environment, **params}.items():
+        _check_key("Param", key)
+        if len(str(value)) > MAX_PARAM_LENGTH:
+            raise ValueError(f"Param {key} is longer than {MAX_PARAM_LENGTH} characters.")
+
+
+def _check_metrics(metrics: Mapping[str, float]) -> None:
+    """Raise ValueError if a metric has a bad key or is not a finite number."""
+    for key, value in metrics.items():
+        _check_key("Metric", key)
+        # bool is a number in Python, but True is not a metric
+        is_number = isinstance(value, numbers.Real) and not isinstance(value, bool)
+        if not is_number or not math.isfinite(value):
+            raise ValueError(f"Metric {key} is not a finite number: {value!r}")
