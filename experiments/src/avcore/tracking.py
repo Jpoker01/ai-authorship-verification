@@ -332,3 +332,55 @@ def connect_tracking(env_path: Path, tracking_uri: str = "databricks") -> None:
     # otherwise every run prints its URL, with the workspace host
     os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] = "true"
     mlflow.set_tracking_uri(tracking_uri)
+
+def log_run_files(run_dir: Path, experiment_name: str) -> str:
+    """Upload a folder written by write_run_files as one MLflow run named after the folder.
+
+    A second call for the same folder returns the finished run instead of a new one, so a
+    failed upload is simply repeated.
+
+    Args:
+        run_dir: Folder written by write_run_files.
+        experiment_name: EXPERIMENT_NAME or SMOKE_EXPERIMENT_NAME; has to exist already.
+
+    Returns:
+        The MLflow run id.
+
+    Raises:
+        RuntimeError: If the folder does not match its manifest or the experiment does not exist.
+    """
+    manifest_path = run_dir / MANIFEST_FILE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    found = {
+        path.name: _sha256(path)
+        for path in run_dir.iterdir()
+        if path.name != MANIFEST_FILE
+    }
+    if found != manifest["files"]:
+        raise RuntimeError(
+            f"The files in {run_dir} do not match its manifest.")
+    experiment = mlflow.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        raise RuntimeError(f"Experiment {experiment_name} does not exist.")
+
+    manifest_sha256 = _sha256(manifest_path)
+    finished_runs = mlflow.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string=f"tags.`{MANIFEST_TAG}` = '{manifest_sha256}' and attributes.status = 'FINISHED'",
+        output_format="list",
+    )
+    if finished_runs:
+        return finished_runs[0].info.run_id
+
+    context = json.loads((run_dir / CONTEXT_FILE).read_text(encoding="utf-8"))
+    params = json.loads((run_dir / PARAMS_FILE).read_text(encoding="utf-8"))
+    metrics = json.loads((run_dir / METRICS_FILE).read_text(encoding="utf-8"))
+    with mlflow.start_run(
+            experiment_id=experiment.experiment_id,
+            run_name=run_dir.name,
+            tags={MANIFEST_TAG: manifest_sha256},
+    ) as run:
+        mlflow.log_params({**context, **params})
+        mlflow.log_metrics(metrics)
+        mlflow.log_artifacts(str(run_dir))
+    return run.info.run_id
