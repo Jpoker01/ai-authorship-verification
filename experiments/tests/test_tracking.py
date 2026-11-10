@@ -16,7 +16,6 @@ from avcore import tracking
 
 def _git(repo_dir, *args):
     """Run a git command in a test repo, with a committer name and email."""
-    return subprocess.check_output(["git", "rev-parse", *args]).decode("utf-8")
     subprocess.run(
         [
             "git",
