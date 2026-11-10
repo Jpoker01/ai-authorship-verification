@@ -3,11 +3,8 @@
 import hashlib
 import importlib.metadata
 import importlib.util
-import os
-
 import json
 import math
-
 import os
 import platform
 import re
@@ -56,3 +53,15 @@ PARAMS_FILE = "params.json"
 METRICS_FILE = "metrics.json"
 MANIFEST_FILE = "manifest.json"
 MANIFEST_TAG = "dt.manifest_sha256"
+
+@dataclass(frozen=True)
+class RunContext:
+    """Environment of a run.
+
+    Attributes:
+        params: Commit, hashes, versions and hardware, logged as MLflow params.
+        packages: Every installed distribution with its version, saved as a file.
+    """
+
+    params: dict[str, str]
+    packages: dict[str, str]
