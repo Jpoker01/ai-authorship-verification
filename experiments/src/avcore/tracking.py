@@ -175,3 +175,17 @@ def collect_run_context(
     }
     packages = {dist.metadata["Name"]: dist.version for dist in importlib.metadata.distributions()}
     return RunContext(params=params, packages=dict(sorted(packages.items())))
+
+def _check_key(kind: str, key: object) -> None:
+    """Raise ValueError if a key is not a valid MLflow / Databricks key."""
+    if not isinstance(key, str):
+        raise ValueError(f"{kind} key {key!r} is not a string.")
+    if len(key) > MAX_KEY_LENGTH:
+        raise ValueError(f"{kind} key {key[:20]!r}... is longer than {MAX_KEY_LENGTH} characters.")
+    if not _KEY_PATTERN.fullmatch(key):
+        raise ValueError(f"{kind} key {key!r} has a character MLflow does not allow.")
+
+def _check_file_name(name: str) -> None:
+    """Raise ValueError if a table or figure name is not a plain file name."""
+    if not _FILE_NAME_PATTERN.fullmatch(name):
+        raise ValueError(f"File name {name!r} is not allowed.")
