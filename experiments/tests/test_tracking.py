@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mlflow
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -109,6 +110,10 @@ def test_collect_run_context_records_commit_lock_and_data_hashes(project_dir, tm
         run_context.environment["data_sha256.train.jsonl"]
         == hashlib.sha256(b'{"id": "a"}\n').hexdigest()
     )
+    expected_keys = {"started_at", "python_version", "cgroup_cpu_max",
+                     "version.mlflow", "gpu_name"}
+    assert expected_keys <= run_context.environment.keys()
+    assert "pandas" in run_context.packages
 
 @pytest.mark.parametrize("change", ["modified", "untracked_hidden", "unpushed"])
 def test_collect_run_context_rejects_an_unclean_repo(project_dir, change):
@@ -163,6 +168,9 @@ def test_collect_run_context_rejects_a_package_outside_the_project(
         ("run_v2", {"tables": {"predictions-test": _predictions_df().assign(same=2)}}),
         ("run_v2", {"tables": {"predictions-test": _predictions_df().assign(score=float("nan"))}}),
         ("run", {}),
+        ("run x_v2", {}),
+        ("run_v2", {"figures": {"sub/confusion_matrix": None}}),
+        ("run_v2", {"tables": {"trials": pd.DataFrame({"note": [np.bytes_(b"x" * 101)]})}}),
     ],
 )
 def test_write_run_files_rejects_invalid_input_and_writes_nothing(
@@ -262,3 +270,51 @@ def test_env_example_lists_the_required_variables():
     )
     names = [line.split("=")[0] for line in lines if line and not line.startswith("#")]
     assert names == tracking.DATABRICKS_VARIABLES
+
+def test_log_run_files_uploads_again_after_a_failed_upload(
+    tmp_path, context, experiment, monkeypatch
+):
+    """A failed upload does not count - the next call uploads the folder as a new run."""
+    run_dir = tmp_path / "longformer_v2"
+    _write(run_dir, context)
+    monkeypatch.setattr(mlflow, "log_artifacts", mock.Mock(side_effect=OSError("no network")))
+    with pytest.raises(OSError):
+        tracking.log_run_files(run_dir, experiment)
+    monkeypatch.undo()
+    run_id = tracking.log_run_files(run_dir, experiment)
+    runs = mlflow.search_runs(experiment_names=[experiment], output_format="list")
+    assert sorted(run.info.status for run in runs) == ["FAILED", "FINISHED"]
+    assert mlflow.get_run(run_id).info.status == "FINISHED"
+
+def test_collect_run_context_rejects_repeated_data_file_names(project_dir, tmp_path):
+    """Two data files with the same name would share one data_sha256 key."""
+    data_paths = [tmp_path / "a" / "train.jsonl", tmp_path / "b" / "train.jsonl"]
+    for data_path in data_paths:
+        data_path.parent.mkdir()
+        data_path.write_text("{}\n")
+    with pytest.raises(ValueError, match="not unique"):
+        tracking.collect_run_context(
+            project_dir, data_paths, package_dir=project_dir / "src" / "avcore"
+        )
+
+def test_write_run_files_accepts_missing_values_and_times(tmp_path, context):
+    """None, NaT and times - as in an Optuna trials table - are plain cells."""
+    trials_df = pd.DataFrame(
+        {
+            "number": [0, 1],
+            "datetime_start": pd.to_datetime(["2026-11-10 10:00", "2026-11-10 11:00"]),
+            "duration": pd.to_timedelta(["1h", None]),
+            "state": ["COMPLETE", None],
+        }
+    )
+    _write(tmp_path / "run_v2", context, tables={"trials": trials_df})
+    assert (tmp_path / "run_v2" / "trials.csv").is_file()
+
+def test_connect_tracking_loads_the_env_file_over_the_shell(tmp_path, monkeypatch):
+    """The .env values win over stale shell variables and run URLs are not printed."""
+    monkeypatch.setenv("DATABRICKS_TOKEN", "stale")
+    env_path = tmp_path / ".env"
+    env_path.write_text("DATABRICKS_HOST=https://example.invalid\nDATABRICKS_TOKEN=fresh\n")
+    tracking.connect_tracking(env_path, tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}")
+    assert os.environ["DATABRICKS_TOKEN"] == "fresh"
+    assert os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] == "true"
