@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 import matplotlib
+from mlflow import set_tracking_uri
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -213,3 +214,41 @@ def test_log_run_files_returns_the_finished_run_on_a_second_call(
         len(mlflow.search_runs(experiment_names=[experiment], output_format="list"))
         == 1
     )
+
+@pytest.mark.parametrize("change", ["extra", "modified"])
+def test_log_run_files_refuses_files_outside_the_manifest(
+    tmp_path, context, experiment, change
+):
+    """An extra or a changed file in the folder stops the upload."""
+    run_dir = tmp_path / "longformer_v2"
+    _write(run_dir, context)
+    if change == "extra":
+        (run_dir / "notes.txt").write_text("text")
+    else:
+        (run_dir / "metrics.json").write_text('{"test_f1": 99.0}')
+    with pytest.raises(RuntimeError, match="manifest"):
+        tracking.log_run_files(run_dir, experiment)
+
+
+def test_log_run_files_requires_an_existing_experiment(tmp_path, context, experiment):
+    """An unknown experiment name stops the upload instead of creating it."""
+    run_dir = tmp_path / "longformer_v2"
+    _write(run_dir, context)
+    with pytest.raises(RuntimeError, match="does not exist"):
+        tracking.log_run_files(run_dir, "missing_v2")
+
+
+def test_connect_tracking_requires_databricks_credentials(tmp_path, monkeypatch):
+    """A missing token raises before MLflow is touched."""
+    for name in tracking.DATABRICKS_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    # the check has to fail before MLflow is touched - a real connection retries for minutes
+    monkeypatch.setattr(
+        mlflow,
+        "set_tracking_uri",
+        mock.Mock(side_effect=AssertionError("MLflow reached")),
+    )
+    env_path = tmp_path / ".env"
+    env_path.write_text("DATABRICKS_HOST=https://example.invalid\n")
+    with pytest.raises(RuntimeError, match="DATABRICKS_TOKEN"):
+        tracking.connect_tracking(env_path)
