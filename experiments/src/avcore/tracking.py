@@ -65,3 +65,31 @@ class RunContext:
 
     params: dict[str, str]
     packages: dict[str, str]
+
+def _git(project_dir: Path, *args: str) -> str:
+    """Run a read-only git command in project_dir and return its stripped output."""
+    result = subprocess.run(
+        ["git", "-C", str(project_dir), *args], capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+def _sha256(path: Path) -> str:
+    """Return the sha256 hex digest of a file, read in chunks."""
+    with path.open("rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
+
+def _version(package: str) -> str:
+    """Return the installed version of a package, or "not installed"."""
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return "not installed"
+
+def _cgroup_value(name: str) -> str:
+    """Return a cgroup v2 limit of this container (cpu.max, memory.max), or "none"."""
+    path = Path("/sys/fs/cgroup") / name
+    return path.read_text(encoding="utf-8").strip() if path.is_file() else "none"
