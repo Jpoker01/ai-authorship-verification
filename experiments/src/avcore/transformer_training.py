@@ -157,3 +157,30 @@ def _save_checkpoint(checkpoint_dir: Path, state: dict) -> None:
         os.fsync(file.fileno())
     # a kill during torch.save leaves the previous checkpoint intact
     os.replace(partial_path, checkpoint_dir / CHECKPOINT_FILE)
+
+def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
+    """Return the checkpoint of this run, None if there is none or it belongs to another run.
+
+    Raises:
+        ValueError: If the checkpoint can not be read, or has this key but describes another run.
+    """
+    checkpoint_path = checkpoint_dir / CHECKPOINT_FILE
+    if not checkpoint_path.is_file():
+        return None
+    # torch.save always writes a zip; anything else would fail in torch.load with an arbitrary error
+    if not zipfile.is_zipfile(checkpoint_path):
+        raise ValueError(f"{checkpoint_path} can not be read - delete it: not a torch.save file")
+    try:
+        # on the CPU - torch.set_rng_state takes only CPU tensors
+        state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    except (RuntimeError, EOFError, IndexError, pickle.UnpicklingError, zipfile.BadZipFile) as error:
+        raise ValueError(f"{checkpoint_path} can not be read - delete it: {error}") from error
+    if state["key"] != key:
+        logger.info(f"Checkpoint of {state['key']} ignored, it is replaced by {key}.")
+        return None
+    if state["run"] != run:
+        raise ValueError(
+            f"{checkpoint_path} ({key}) was written for other settings or pairs - "
+            f"delete it if its study file was deleted: {state['run']}"
+        )
+    return state
