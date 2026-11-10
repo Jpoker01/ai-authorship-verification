@@ -123,3 +123,57 @@ def test_collect_run_context_rejects_an_unclean_repo(project_dir, change):
         tracking.collect_run_context(
             project_dir, [], package_dir=project_dir / "src" / "avcore"
         )
+
+def test_collect_run_context_rejects_a_package_outside_the_project(
+    project_dir, tmp_path
+):
+    """An avcore imported from another folder than project_dir stops the run."""
+    with pytest.raises(RuntimeError, match="imported from"):
+        tracking.collect_run_context(
+            project_dir, [], package_dir=tmp_path / "other" / "avcore"
+        )
+
+@pytest.mark.parametrize(
+    ("run_name", "changes"),
+    [
+        ("run_v2", {"metrics": {"test_f1": float("nan")}}),
+        ("run_v2", {"metrics": {"test_f1": True}}),
+        ("run_v2", {"params": {"commit": "replaced"}}),
+        ("run_v2", {"params": {"note": "x" * 251}}),
+        ("run_v2", {"params": {"f1@0.5": 1}}),
+        (
+            "run_v2",
+            {"tables": {"trials": pd.DataFrame({"pair": [["text one", "text two"]]})}},
+        ),
+        ("run_v2", {"tables": {"trials": pd.DataFrame({"note": ["x" * 101]})}}),
+        ("run_v2", {"tables": {"sub/trials": pd.DataFrame({"a": [1]})}}),
+        (
+            "run_v2",
+            {
+                "tables": {
+                    "predictions-test": _predictions_df().rename(
+                        columns={"score": "propability_same_author"}
+                    )
+                }
+            },
+        ),
+        ("run_v2", {"tables": {"predictions-test": _predictions_df().assign(id="a")}}),
+        ("run_v2", {"tables": {"test_predictions": _predictions_df()}}),
+        ("run_v2", {"tables": {"predictions-test": _predictions_df().assign(same=2)}}),
+        ("run_v2", {"tables": {"predictions-test": _predictions_df().assign(score=float("nan"))}}),
+        ("run", {}),
+    ],
+)
+def test_write_run_files_rejects_invalid_input_and_writes_nothing(
+    tmp_path, context, run_name, changes
+):
+    """Every invalid input raises ValueError before any file or folder is written."""
+    with pytest.raises(ValueError):
+        _write(tmp_path / run_name, context, **changes)
+    assert list(tmp_path.iterdir()) == []
+
+def test_write_run_files_refuses_an_existing_folder(tmp_path, context):
+    """An existing run folder is never written into."""
+    (tmp_path / "run_v2").mkdir()
+    with pytest.raises(FileExistsError):
+        _write(tmp_path / "run_v2", context)
