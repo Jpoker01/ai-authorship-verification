@@ -189,3 +189,38 @@ def _check_file_name(name: str) -> None:
     """Raise ValueError if a table or figure name is not a plain file name."""
     if not _FILE_NAME_PATTERN.fullmatch(name):
         raise ValueError(f"File name {name!r} is not allowed.")
+
+
+def _is_plain_cell(value: object) -> bool:
+    """Return True for a number, a bool or a short string - never a list or a long text."""
+    if isinstance(value, str):
+        return len(value) <= MAX_TABLE_TEXT_LENGTH
+    # bool is a subclass of int, so True / False count as numbers too
+    is_python_number = isinstance(value, (int, float))
+    is_numpy_number = isinstance(value, np.generic)
+    return is_python_number or is_numpy_number
+
+def _check_table(name: str, table_df: pd.DataFrame) -> None:
+    """Raise ValueError if a table can hold text, or a prediction table is malformed."""
+    _check_file_name(name)
+    for column in table_df.columns:
+        cells = [column, *table_df[column].astype(object)]
+        if not all(_is_plain_cell(cell) for cell in cells):
+            raise ValueError(f"Table {name} column {str(column)[:20]!r} holds a list, an object or a long text.")
+    if "prediction" in name:
+        _check_predictions(name, table_df)
+
+def _check_predictions(name: str, predictions_df: pd.DataFrame) -> None:
+    """Raise ValueError unless a prediction table has the agreed name, columns and values."""
+    if name not in PREDICTION_TABLES or list(
+            predictions_df.columns) != PREDICTION_COLUMNS:
+        raise ValueError(
+            f"Prediction table {name} has to be one of {PREDICTION_TABLES} with columns {PREDICTION_COLUMNS}.")
+    if not predictions_df["id"].is_unique:
+        raise ValueError(f"Table {name} has repeated ids.")
+    if not predictions_df[["same", "pred"]].isin([0, 1]).all(axis=None):
+        raise ValueError(
+            f"Table {name} has a same or pred value that is not 0 / 1.")
+    if not np.isfinite(
+            predictions_df["score"].to_numpy(dtype=float)).all():
+        raise ValueError(f"Table {name} has a score that is not finite.")
