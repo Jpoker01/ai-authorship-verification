@@ -41,7 +41,6 @@ DATABRICKS_VARIABLES = ["DATABRICKS_HOST", "DATABRICKS_TOKEN"]
 PACKAGE_DIR = Path(__file__).resolve().parent
 
 # Databricks limits keys and param values to 250 characters; the local stores accept more
-MAX_KEY_LENGTH = 250
 MAX_PARAM_LENGTH = 250
 # a PAN text has about 21 000 characters, ids and hyperparameter values far fewer
 MAX_TABLE_TEXT_LENGTH = 100
