@@ -31,4 +31,4 @@ experiments/conf/local
 
 /tools/
 
-./dataset_count2.py
+!/dataset_count2.py
