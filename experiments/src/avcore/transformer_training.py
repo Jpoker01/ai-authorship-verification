@@ -121,3 +121,27 @@ def score_pairs(
         }
     )
 
+def _epoch_order(n_pairs: int, seed: int, epoch: int) -> list[int]:
+    """Return the shuffled row order of an epoch, the same for the same seed and epoch."""
+    generator = torch.Generator().manual_seed(seed + epoch)
+    return torch.randperm(n_pairs, generator=generator).tolist()
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def _describe_run(
+    model: PreTrainedModel,
+    train_df: pd.DataFrame,
+    settings: TrainingSettings,
+    trial: optuna.Trial | None,
+) -> dict:
+    """Return everything that decides the trained weights - a checkpoint resumes only an equal run."""
+    return {
+        **asdict(settings),
+        "model": model.name_or_path,
+        # holds the dropout too, when it is set through from_pretrained
+        "model_config_sha256": _sha256(model.config.to_json_string()),
+        "train_pairs": len(train_df),
+        "train_ids_sha256": _sha256("\n".join(train_df["id"].astype(str))),
+        "trial_params": {} if trial is None else dict(trial.params),
+    }
