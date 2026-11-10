@@ -106,6 +106,7 @@ def _gpu_params() -> dict[str, str]:
     # the default group has no torch, the traditional notebooks run without it
     if importlib.util.find_spec("torch") is None:
         return params
+
     import torch
 
     params["cuda_version"] = str(torch.version.cuda)
@@ -117,3 +118,60 @@ def _gpu_params() -> dict[str, str]:
         params["gpu_vram_gb"] = str(
             round(properties.total_memory / 1024 ** 3, 2))
     return params
+
+
+def _check_repo(project_dir: Path, package_dir: Path) -> None:
+    """Raise RuntimeError unless the repo is committed, pushed and the source of avcore."""
+    status = _git(project_dir, "status", "--porcelain=v1", "--untracked-files=all")
+    if status:
+        raise RuntimeError(f"The repo has uncommitted changes:\n{status}")
+    if not _git(project_dir, "branch", "--remotes", "--contains", "HEAD"):
+        raise RuntimeError("HEAD is not on any remote branch - push it first.")
+    if not package_dir.resolve().is_relative_to(project_dir.resolve()):
+        raise RuntimeError(f"avcore is imported from {package_dir}, not from {project_dir}.")
+
+def collect_run_context(
+    project_dir: Path,
+    data_paths: Sequence[Path],
+    *,
+    package_dir: Path = PACKAGE_DIR,
+) -> RunContext:
+    """Collect the commit, lock and data hashes, versions and hardware of a run.
+
+    Call it once at the top of a notebook (it hashes every data file).
+
+    Args:
+        project_dir: The experiments folder of the repo (holds uv.lock).
+        data_paths: Every data file the run reads.
+        package_dir: Folder avcore is imported from, has to lie inside project_dir.
+
+    Returns:
+        The run context.
+
+    Raises:
+        RuntimeError: If the repo is not clean, not pushed or not the source of avcore.
+        ValueError: If two data files share a file name.
+    """
+    _check_repo(project_dir, package_dir)
+    names = [path.name for path in data_paths]
+    if len(set(names)) != len(names):
+        raise ValueError(f"Data file names are not unique: {names}")
+
+    # the same lock hashes the same on Windows (CRLF checkout) and Linux
+    lock_bytes = (project_dir / "uv.lock").read_bytes().replace(b"\r\n", b"\n")
+    params = {
+        "commit": _git(project_dir, "rev-parse", "HEAD"),
+        "uv_lock_sha256": hashlib.sha256(lock_bytes).hexdigest(),
+        "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "cpu_count": str(os.cpu_count()),
+        "cgroup_cpu_max": _cgroup_value("cpu.max"),
+        "cgroup_memory_max": _cgroup_value("memory.max"),
+        "omp_num_threads": os.environ.get("OMP_NUM_THREADS", "unset"),
+        **{f"data_sha256.{path.name}": _sha256(path) for path in data_paths},
+        **{f"version.{package}": _version(package) for package in PACKAGES},
+        **_gpu_params(),
+    }
+    packages = {dist.metadata["Name"]: dist.version for dist in importlib.metadata.distributions()}
+    return RunContext(params=params, packages=dict(sorted(packages.items())))
