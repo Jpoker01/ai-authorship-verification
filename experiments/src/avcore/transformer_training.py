@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 MAX_LENGTH = 4096
 CHECKPOINT_FILE = "checkpoint.pt"
 CHECKPOINT_MINUTES = 60
+TRAINING_SECONDS_ATTR = "training_seconds"
 
 @dataclass(frozen=True)
 class TrainingSettings:
@@ -297,15 +298,17 @@ def _restore(
     )
 
 def _report_and_prune(
-    trial: optuna.Trial | None, pruning_f1: float, epoch: int
-) -> None:
+        trial: optuna.Trial | None, pruning_f1: float, epoch: int,
+        training_seconds: float) -> None:
     """Report the pruning F1 of an epoch to the trial, if there is one.
+            The training time so far is stored in the trial first - a pruned trial returns no TrainingResult.
 
     Raises:
         optuna.TrialPruned: If the pruner stops the trial.
     """
     if trial is None:
         return
+    trial.set_user_attr(TRAINING_SECONDS_ATTR, training_seconds)
     trial.report(pruning_f1, epoch)
     if trial.should_prune():
         raise optuna.TrialPruned()
@@ -365,7 +368,8 @@ def train_classifier(
         checkpoint_dir: Folder of the checkpoints of one notebook, outside the repo.
         checkpoint_key: Name of the run - checkpoint_key_for(trial), or e.g. "final".
         validation_df: Pairs scored after every epoch for pruning; None for the final training.
-        trial: Optuna trial the pruning F1 is reported to; needs validation_df.
+        trial: Optuna trial the pruning F1 is reported to; needs validation_df. The training time
+            so far is stored in its user attribute TRAINING_SECONDS_ATTR before every report.
         checkpoint_minutes: Time between two checkpoints inside an epoch.
 
     Returns:
@@ -400,8 +404,7 @@ def train_classifier(
         # the reports of the crashed trial are hidden from the pruner - they are replayed with
         # their pruning decisions, as in the uninterrupted run
         for done_epoch, pruning_f1 in enumerate(progress.pruning_f1s):
-            _report_and_prune(trial, pruning_f1, done_epoch)
-
+            _report_and_prune(trial, pruning_f1, done_epoch, progress.training_seconds)
     def save() -> None:
         nonlocal last_save
         # only the time up to a save counts - a restart repeats the work done after it
@@ -451,8 +454,10 @@ def train_classifier(
         # saved before the report - a trial killed between the two replays the report on resume
         save()
         if trial is not None:
-            _report_and_prune(trial, progress.pruning_f1s[-1], finished_epoch)
-
+            _report_and_prune(
+                trial, progress.pruning_f1s[-1], finished_epoch,
+                progress.training_seconds
+            )
     if validation_df is not None and validation_scores_df is None:
         # resumed after the last epoch - the scores of the restored model
         validation_scores_df = score_pairs(model, tokenizer, validation_df)
