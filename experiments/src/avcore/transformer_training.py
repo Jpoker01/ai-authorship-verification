@@ -62,11 +62,15 @@ class TrainingResult:
         epoch_losses: Mean training loss of every epoch.
         pruning_f1s: Weighted F1 at argmax on validation after every epoch (empty without validation).
         validation_scores_df: score_pairs output of the last epoch, or None without validation.
+        training_seconds: Seconds of the training steps and of the validation scoring after each
+            epoch up to the last checkpoint, summed over restarts - without loading the model or
+            the checkpoint, the saves and the final re-scoring.
     """
 
     epoch_losses: list[float]
     pruning_f1s: list[float]
     validation_scores_df: pd.DataFrame | None
+    training_seconds: float
 
 def checkpoint_key_for(trial: optuna.Trial) -> str:
     """Name the checkpoint of a trial by its study and position, which a repeated trial keeps.
@@ -208,6 +212,7 @@ class _Progress:
     epoch_loss: float = 0.0
     epoch_losses: list[float] = field(default_factory=list)
     pruning_f1s: list[float] = field(default_factory=list)
+    training_seconds: float = 0.0
 
 def _check_inputs(
     model: PreTrainedModel,
@@ -263,7 +268,7 @@ def _collect_checkpoint_state(
         "scheduler": scheduler.state_dict(),
         "rng_cpu": torch.get_rng_state(),
         "rng_cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
-        # epoch, step, epoch_loss, epoch_losses and pruning_f1s
+        # epoch, step, epoch_loss, epoch_losses, pruning_f1s and training_seconds
         **asdict(progress),
     }
 
@@ -288,6 +293,7 @@ def _restore(
         epoch_loss=state["epoch_loss"],
         epoch_losses=state["epoch_losses"],
         pruning_f1s=state["pruning_f1s"],
+        training_seconds=state["training_seconds"],
     )
 
 def _report_and_prune(
@@ -363,7 +369,7 @@ def train_classifier(
         checkpoint_minutes: Time between two checkpoints inside an epoch.
 
     Returns:
-        The losses, the pruning F1 values and the last validation scores.
+        The losses, the pruning F1 values, the last validation scores and the training time.
 
     Raises:
         ValueError: If train_df is empty, a setting is out of range, trial is given without
@@ -398,6 +404,8 @@ def train_classifier(
 
     def save() -> None:
         nonlocal last_save
+        # only the time up to a save counts - a restart repeats the work done after it
+        progress.training_seconds += time.monotonic() - last_save
         state = _collect_checkpoint_state(
             key=checkpoint_key,
             run=run,
@@ -452,4 +460,5 @@ def train_classifier(
         epoch_losses=progress.epoch_losses,
         pruning_f1s=progress.pruning_f1s,
         validation_scores_df=validation_scores_df,
+        training_seconds=progress.training_seconds,
     )
