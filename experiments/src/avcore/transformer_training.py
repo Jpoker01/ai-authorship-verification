@@ -12,7 +12,7 @@ import pickle
 import time
 import zipfile
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import optuna
@@ -185,3 +185,29 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
         )
     return state
 
+@dataclass
+class _Progress:
+    """Where a training run stands - saved in every checkpoint next to the weights."""
+
+    epoch: int = 0
+    step: int = 0
+    epoch_loss: float = 0.0
+    epoch_losses: list[float] = field(default_factory=list)
+    pruning_f1s: list[float] = field(default_factory=list)
+
+def _check_inputs(
+    model: PreTrainedModel,
+    train_df: pd.DataFrame,
+    settings: TrainingSettings,
+    validation_df: pd.DataFrame | None,
+    trial: optuna.Trial | None,
+) -> None:
+    """Raise a ValueError for an input that can not be trained on."""
+    if train_df.empty:
+        raise ValueError("train_df is empty.")
+    if settings.epochs < 1 or settings.batch_size < 1:
+        raise ValueError(f"epochs and batch_size have to be at least 1: {settings}")
+    if trial is not None and validation_df is None:
+        raise ValueError("Pruning needs validation_df.")
+    if model.config.num_labels != 2:
+        raise ValueError(f"The model has {model.config.num_labels} labels, not 2.")
