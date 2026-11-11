@@ -218,3 +218,58 @@ def test_train_classifier_saves_a_checkpoint_only_after_checkpoint_minutes(token
     # 15 pairs / batch size 3 = 5 steps per epoch; 2 minutes are reached exactly after step 3
     _train(tokenizer, tmp_path, train_df=_pairs(15), checkpoint_minutes=2)
     assert saved_steps == [(0, 3), (1, 0), (1, 3), (2, 0)]
+
+def test_train_classifier_resumes_after_a_crash(tokenizer, tmp_path, optimizer_steps):
+    """A crash in the middle of epoch 2 resumes at the saved step and ends with the same weights."""
+    reference_model, reference_result = _train(tokenizer, tmp_path / "reference")
+    optimizer_steps.update(done=0, crash_at=5)
+    with pytest.raises(KeyboardInterrupt):
+        _train(tokenizer, tmp_path / "run", checkpoint_minutes=0)
+    optimizer_steps["done"] = 0
+    resumed_model, resumed_result = _train(tokenizer, tmp_path / "run", checkpoint_minutes=0)
+    assert optimizer_steps["done"] == 2  # 6 steps, 4 done before the crash
+    assert _same_weights(resumed_model, reference_model)
+    assert resumed_result.epoch_losses == reference_result.epoch_losses
+
+def test_finished_run_returns_its_scores_without_training_again(tokenizer,
+                                                                tmp_path,
+                                                                optimizer_steps):
+    """A run repeated after it finished (killed before the trial was stored) trains nothing."""
+    validation_df = _pairs(6, offset=1)
+    _, first_result = _train(tokenizer, tmp_path,
+                             validation_df=validation_df)
+    optimizer_steps["done"] = 0
+    _, repeated_result = _train(tokenizer, tmp_path,
+                                validation_df=validation_df)
+    assert optimizer_steps["done"] == 0
+    pd.testing.assert_frame_equal(repeated_result.validation_scores_df,
+                                  first_result.validation_scores_df)
+    assert repeated_result.pruning_f1s == first_result.pruning_f1s
+
+def test_a_kill_during_a_save_keeps_the_previous_checkpoint(tokenizer, tmp_path, monkeypatch, optimizer_steps):
+    """A save killed half-way leaves the last complete checkpoint, the run resumes from it."""
+    reference_model, _ = _train(tokenizer, tmp_path / "reference")
+    original_save = torch.save
+    saves = {"n": 0}
+
+    def half_save(obj, file, *args, **kwargs):
+        saves["n"] += 1
+        if saves["n"] == 2:
+            file.write(b"half a checkpoint")
+            raise KeyboardInterrupt
+        return original_save(obj, file, *args, **kwargs)
+
+    with monkeypatch.context() as patch, pytest.raises(KeyboardInterrupt):
+        patch.setattr(torch, "save", half_save)
+        _train(tokenizer, tmp_path / "run", checkpoint_minutes=0)
+    optimizer_steps["done"] = 0
+    resumed_model, _ = _train(tokenizer, tmp_path / "run", checkpoint_minutes=0)
+    assert optimizer_steps["done"] == 5  # resumed after step 1, the step of the first save
+    assert _same_weights(resumed_model, reference_model)
+
+def test_train_classifier_ignores_a_checkpoint_of_another_run(tokenizer, tmp_path, optimizer_steps):
+    """A checkpoint with another key is not loaded - the run trains all its steps."""
+    _train(tokenizer, tmp_path, key="position-3")
+    optimizer_steps["done"] = 0
+    _train(tokenizer, tmp_path, key="position-4")
+    assert optimizer_steps["done"] == 6
