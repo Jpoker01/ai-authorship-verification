@@ -376,3 +376,46 @@ def train_classifier(
         # their pruning decisions, as in the uninterrupted run
         for done_epoch, pruning_f1 in enumerate(progress.pruning_f1s):
             _report_and_prune(trial, pruning_f1, done_epoch)
+
+    def save() -> None:
+        state = _collect_checkpoint_state(
+            checkpoint_key, run, model, optimizer, scheduler, progress
+        )
+        _save_checkpoint(checkpoint_dir, state)
+
+    validation_scores_df = None
+    model.train()
+    last_save = time.monotonic()
+    while progress.epoch < settings.epochs:
+        # the order of an epoch depends only on the seed, so a resumed epoch skips its done batches
+        order = _epoch_order(len(train_df), settings.seed, progress.epoch)
+        while progress.step < steps_per_epoch:
+            start = progress.step * settings.batch_size
+            batch_df = train_df.iloc[order[start : start + settings.batch_size]]
+            progress.epoch_loss += _train_step(
+                model, tokenizer, batch_df, optimizer, scheduler
+            )
+            progress.step += 1
+            if time.monotonic() - last_save >= checkpoint_minutes * 60:
+                save()
+                last_save = time.monotonic()
+        progress.epoch_losses.append(progress.epoch_loss / steps_per_epoch)
+        if validation_df is not None:
+            validation_scores_df = score_pairs(model, tokenizer, validation_df)
+            progress.pruning_f1s.append(_compute_pruning_f1(validation_scores_df))
+        logger.info(
+            f"{checkpoint_key} epoch {progress.epoch + 1} / {settings.epochs} - "
+            f"loss {progress.epoch_losses[-1]:.4f}"
+        )
+        progress.epoch, progress.step, progress.epoch_loss = progress.epoch + 1, 0, 0.0
+        save()
+        last_save = time.monotonic()
+        if trial is not None:
+            _report_and_prune(trial, progress.pruning_f1s[-1], progress.epoch - 1)
+
+    if validation_df is not None and validation_scores_df is None:
+        # resumed after the last epoch - the scores of the restored model
+        validation_scores_df = score_pairs(model, tokenizer, validation_df)
+    return TrainingResult(
+        progress.epoch_losses, progress.pruning_f1s, validation_scores_df
+    )
