@@ -318,3 +318,61 @@ def _compute_pruning_f1(validation_scores_df: pd.DataFrame) -> float:
         average="weighted",
     )
     return float(pruning_f1)
+
+def train_classifier(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    train_df: pd.DataFrame,
+    settings: TrainingSettings,
+    checkpoint_dir: Path,
+    checkpoint_key: str,
+    *,
+    validation_df: pd.DataFrame | None = None,
+    trial: optuna.Trial | None = None,
+    checkpoint_minutes: float = CHECKPOINT_MINUTES,
+) -> TrainingResult:
+    """Fine-tune the classifier with AdamW and a linear warmup schedule, resuming a checkpoint.
+
+    The state is saved every checkpoint_minutes and after every epoch into ONE file in
+    checkpoint_dir; a checkpoint with another key is overwritten, so only the last run is kept.
+    One process per checkpoint_dir.
+
+    Args:
+        model: Freshly loaded classifier with 2 labels, already on its device.
+        tokenizer: Tokenizer of the model.
+        train_df: Training pairs with id, same and pair.
+        settings: Hyperparameters of the run.
+        checkpoint_dir: Folder of the checkpoints of one notebook, outside the repo.
+        checkpoint_key: Name of the run - checkpoint_key_for(trial), or e.g. "final".
+        validation_df: Pairs scored after every epoch for pruning; None for the final training.
+        trial: Optuna trial the pruning F1 is reported to; needs validation_df.
+        checkpoint_minutes: Time between two checkpoints inside an epoch.
+
+    Returns:
+        The losses, the pruning F1 values and the last validation scores.
+
+    Raises:
+        ValueError: If train_df is empty, a setting is out of range, trial is given without
+            validation_df, the model has not 2 labels, or the checkpoint of this key can not be
+            read or describes another run.
+        optuna.TrialPruned: If the pruner stops the trial after an epoch.
+    """
+    _check_inputs(model, train_df, settings, validation_df, trial)
+    # the last batch is smaller, as with the v1 DataLoader (drop_last=False)
+    steps_per_epoch = -(-len(train_df) // settings.batch_size)
+    optimizer, scheduler = _build_optimizer_and_scheduler(
+        model, settings, steps_per_epoch
+    )
+    run = _describe_run(model, train_df, settings, trial)
+    progress = _Progress()
+    state = _load_checkpoint(checkpoint_dir, checkpoint_key, run)
+    if state is not None:
+        progress = _restore(state, model, optimizer, scheduler)
+        del state  # one copy of the weights, not two
+        logger.info(
+            f"{checkpoint_key} resumed at epoch {progress.epoch + 1}, step {progress.step}."
+        )
+        # the reports of the crashed trial are hidden from the pruner - they are replayed with
+        # their pruning decisions, as in the uninterrupted run
+        for done_epoch, pruning_f1 in enumerate(progress.pruning_f1s):
+            _report_and_prune(trial, pruning_f1, done_epoch)
