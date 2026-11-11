@@ -275,3 +275,46 @@ def _restore(
         epoch_losses=state["epoch_losses"],
         pruning_f1s=state["pruning_f1s"],
     )
+
+def _report_and_prune(
+    trial: optuna.Trial | None, pruning_f1: float, epoch: int
+) -> None:
+    """Report the pruning F1 of an epoch to the trial, if there is one.
+
+    Raises:
+        optuna.TrialPruned: If the pruner stops the trial.
+    """
+    if trial is None:
+        return
+    trial.report(pruning_f1, epoch)
+    if trial.should_prune():
+        raise optuna.TrialPruned()
+
+def _train_step(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    batch_df: pd.DataFrame,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+) -> float:
+    """Train on one batch and return its loss."""
+    device = next(model.parameters()).device
+    # long - cross_entropy rejects the int32 that astype(int) gives on Windows
+    labels = torch.tensor(batch_df["same"].to_numpy(), dtype=torch.long, device=device)
+    loss = model(
+        **_encode(tokenizer, batch_df["pair"].tolist(), device), labels=labels
+    ).loss
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    scheduler.step()
+    return loss.item()
+
+def _compute_pruning_f1(validation_scores_df: pd.DataFrame) -> float:
+    """Return the weighted F1 of the argmax labels, the value the pruner compares."""
+    pruning_f1 = f1_score(
+        validation_scores_df["same"].astype(int),
+        validation_scores_df["argmax"],
+        average="weighted",
+    )
+    return float(pruning_f1)
