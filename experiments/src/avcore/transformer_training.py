@@ -211,3 +211,22 @@ def _check_inputs(
         raise ValueError("Pruning needs validation_df.")
     if model.config.num_labels != 2:
         raise ValueError(f"The model has {model.config.num_labels} labels, not 2.")
+
+def _build_optimizer_and_scheduler(
+    model: PreTrainedModel,
+    settings: TrainingSettings,
+    steps_per_epoch: int,
+) -> tuple[torch.optim.AdamW, torch.optim.lr_scheduler.LambdaLR]:
+    """Return AdamW and its linear schedule with warmup over all steps of the run."""
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=settings.learning_rate,
+        weight_decay=settings.weight_decay,
+    )
+    total_steps = steps_per_epoch * settings.epochs
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=int(total_steps * settings.warmup_ratio),
+        num_training_steps=total_steps,
+    )
+    return optimizer, scheduler
