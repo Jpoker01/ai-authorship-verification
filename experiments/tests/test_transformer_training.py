@@ -142,3 +142,79 @@ def test_train_classifier_follows_the_linear_warmup_schedule(tokenizer, tmp_path
     settings = transformer_training.TrainingSettings(1e-3, 0.01, epochs=2, batch_size=3, warmup_ratio=0.5)
     _train(tokenizer, tmp_path, settings=settings)
     assert optimizer_steps["learning_rates"] == pytest.approx([0, 1e-3 / 3, 2e-3 / 3, 1e-3, 2e-3 / 3, 1e-3 / 3])
+
+def test_train_classifier_reports_the_weighted_f1_at_argmax_of_every_epoch(tokenizer, tmp_path, monkeypatch):
+    """Each epoch's pruning F1 is the weighted F1 of that epoch's argmax labels (v1); the last scores are returned."""
+    validation_df = _pairs(5, offset=1)  # 3 different and 2 same - the weighted F1 differs from the macro F1
+    argmaxes = iter([[1, 1, 0, 0, 0], [0, 1, 0, 1, 1]])
+    scored = []
+
+    def fake_score_pairs(model, tokenizer, pairs_df):
+        scores_df = pd.DataFrame(
+            {
+                "id": pairs_df["id"].to_numpy(),
+                "same": pairs_df["same"].to_numpy(),
+                "score": 0.5,  # not used by the pruning F1
+                "argmax": next(argmaxes),
+            }
+        )
+        scored.append(scores_df)
+        return scores_df
+
+    monkeypatch.setattr(transformer_training, "score_pairs", fake_score_pairs)
+    #executes normal training but returns fake scores from fake_score_pairs
+    _, result = _train(tokenizer, tmp_path, validation_df=validation_df)
+    labels = validation_df["same"].astype(int)
+    assert len(scored) == 2  # scored after every epoch
+    assert result.pruning_f1s == [f1_score(labels, df["argmax"], average="weighted") for df in scored]
+    assert result.validation_scores_df is scored[-1]
+
+
+def test_train_classifier_reports_the_mean_loss_of_every_epoch(tokenizer, tmp_path):
+    """epoch_losses holds the mean of the batch losses of each epoch, trained in train mode (dropout on)."""
+    model = _model()
+    batch_losses = []
+    original_forward = model.forward
+
+    def recording_forward(*args, **kwargs):
+        outputs = original_forward(*args, **kwargs)
+        assert model.training
+        batch_losses.append(outputs.loss.item())
+        return outputs
+
+    model.forward = recording_forward
+    # 10 pairs / batch size 3 = 4 steps per epoch, so the mean is not the sum / batch size
+    result = transformer_training.train_classifier(model, tokenizer, _pairs(10), SETTINGS, tmp_path, "final")
+    assert len(batch_losses) == 8
+    assert result.epoch_losses == pytest.approx([sum(batch_losses[:4]) / 4, sum(batch_losses[4:]) / 4])
+
+
+def test_epoch_order_changes_every_epoch():
+    """Every epoch is shuffled anew, as with the v1 DataLoader; the same epoch always the same way."""
+    first = transformer_training._epoch_order(20, seed=42, epoch=0)
+    assert sorted(first) == list(range(20))
+    assert first == transformer_training._epoch_order(20, seed=42, epoch=0)
+    assert first != transformer_training._epoch_order(20, seed=42, epoch=1)
+    assert first != transformer_training._epoch_order(20, seed=7, epoch=0)
+
+def test_train_classifier_saves_a_checkpoint_only_after_checkpoint_minutes(tokenizer, tmp_path, monkeypatch):
+    """Inside an epoch a checkpoint is written once checkpoint_minutes have passed, and after every epoch."""
+    clock = {"now": 0.0}
+    monkeypatch.setattr(transformer_training.time, "monotonic", lambda: clock["now"])
+    saved_steps = []
+    original_save = transformer_training._save_checkpoint
+    original_step = torch.optim.AdamW.step
+
+    def recording_save(checkpoint_dir, state):
+        saved_steps.append((state["epoch"], state["step"]))
+        original_save(checkpoint_dir, state)
+
+    def timed_step(self, *args, **kwargs):
+        clock["now"] += 40  # every step takes 40 seconds
+        return original_step(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.optim.AdamW, "step", timed_step)
+    monkeypatch.setattr(transformer_training, "_save_checkpoint", recording_save)
+    # 15 pairs / batch size 3 = 5 steps per epoch; 2 minutes are reached exactly after step 3
+    _train(tokenizer, tmp_path, train_df=_pairs(15), checkpoint_minutes=2)
+    assert saved_steps == [(0, 3), (1, 0), (1, 3), (2, 0)]
