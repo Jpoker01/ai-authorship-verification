@@ -273,3 +273,145 @@ def test_train_classifier_ignores_a_checkpoint_of_another_run(tokenizer, tmp_pat
     optimizer_steps["done"] = 0
     _train(tokenizer, tmp_path, key="position-4")
     assert optimizer_steps["done"] == 6
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"settings": transformer_training.TrainingSettings(2e-3, 0.01, epochs=2, batch_size=3, warmup_ratio=0.1)},
+        {"train_df": _pairs(8, offset=9)},
+        {"dropout": 0.2},
+    ],
+)
+def test_train_classifier_refuses_a_checkpoint_of_the_same_key_with_other_inputs(tokenizer, tmp_path, changes):
+    """The same key with other hyperparameters or other pairs means a changed study - it raises."""
+    _train(tokenizer, tmp_path, key="position-3")
+    with pytest.raises(ValueError, match="other settings or pairs"):
+        _train(tokenizer, tmp_path, key="position-3", **changes)
+
+def test_repeated_trial_resumes_and_reports_its_epochs_again(tokenizer, tmp_path, optimizer_steps):
+    """A trial killed in epoch 2 is repeated at its position, resumes and reports both epochs."""
+    validation_df = _pairs(4, offset=2)
+
+    def objective(trial):
+        trial.suggest_float("x", 0, 1)
+        result = transformer_training.train_classifier(
+            _model(),
+            tokenizer,
+            _pairs(8),
+            SETTINGS,
+            tmp_path / "checkpoints",
+            transformer_training.checkpoint_key_for(trial),
+            validation_df=validation_df,
+            trial=trial,
+        )
+        return result.pruning_f1s[-1]
+
+    reference_study = open_study(tmp_path / "reference.db", pruner=optuna.pruners.NopPruner())
+    run_study(reference_study, objective, n_trials=1)
+    optimizer_steps.update(done=0, crash_at=4)  # the first step of epoch 2
+    study = open_study(tmp_path / "study.db", pruner=optuna.pruners.NopPruner())
+    with pytest.raises(KeyboardInterrupt):
+        run_study(study, objective, n_trials=1)
+    optimizer_steps["done"] = 0
+    study = open_study(tmp_path / "study.db", pruner=optuna.pruners.NopPruner())
+    run_study(study, objective, n_trials=1)
+
+    failed, repeated = study.trials
+    assert [failed.state.name, repeated.state.name] == ["FAIL", "COMPLETE"]
+    assert repeated.params == failed.params
+    assert optimizer_steps["done"] == 3  # epoch 2 only
+    assert repeated.intermediate_values == reference_study.trials[0].intermediate_values
+
+def test_repeated_trial_gets_the_pruning_decisions_of_an_uninterrupted_study(tokenizer, tmp_path, monkeypatch):
+    """Killed before the pruning decision of its last epoch, a repeated trial is still pruned (v1 pruner)."""
+    # scripted pruning F1 per position and epoch - position 1 is pruned after epoch 2, its last
+    scripted_f1s = {0: [0.5, 0.6], 1: [0.5, 0.4]}
+    computed = {0: 0, 1: 0}
+    current = {"position": 0}
+
+    def scripted_f1(*args, **kwargs):
+        position = current["position"]
+        computed[position] += 1
+        return scripted_f1s[position][computed[position] - 1]
+
+    def objective(trial):
+        current["position"] = trial.user_attrs["position"]
+        result = transformer_training.train_classifier(
+            _model(),
+            tokenizer,
+            _pairs(8),
+            SETTINGS,
+            tmp_path / trial.study.study_name,
+            transformer_training.checkpoint_key_for(trial),
+            validation_df=_pairs(4, offset=2),
+            trial=trial,
+        )
+        return result.pruning_f1s[-1]
+
+    def pruner():
+        return optuna.pruners.SuccessiveHalvingPruner(min_resource=1, reduction_factor=3, min_early_stopping_rate=0)
+
+    monkeypatch.setattr(transformer_training, "f1_score", scripted_f1)
+    reference_study = open_study(tmp_path / "reference.db", pruner=pruner())
+    run_study(reference_study, objective, n_trials=2)
+
+    computed.update({0: 0, 1: 0})
+    study = open_study(tmp_path / "study.db", pruner=pruner())
+    original_should_prune = optuna.Trial.should_prune
+
+    def kill_before_the_last_decision_of_position_1(self):
+        if self.user_attrs["position"] == 1 and computed[1] == 2:
+            raise KeyboardInterrupt
+        return original_should_prune(self)
+
+    with monkeypatch.context() as patch, pytest.raises(KeyboardInterrupt):
+        patch.setattr(optuna.Trial, "should_prune", kill_before_the_last_decision_of_position_1)
+        run_study(study, objective, n_trials=2)
+    study = open_study(tmp_path / "study.db", pruner=pruner())
+    run_study(study, objective, n_trials=2)
+
+    def summary(trials):
+        return [(trial.state.name, trial.intermediate_values) for trial in trials if not trial.user_attrs.get("crashed")]
+
+    assert [state for state, _ in summary(reference_study.trials)] == ["COMPLETE", "PRUNED"]
+    assert summary(study.trials) == summary(reference_study.trials)
+
+def test_train_classifier_prunes_after_an_epoch(tokenizer, tmp_path):
+    """A pruner that always prunes stops the trial after epoch 1 with its F1 reported."""
+
+    class AlwaysPrune(optuna.pruners.BasePruner):
+        def prune(self, study, trial):
+            return True
+
+    study = optuna.create_study(pruner=AlwaysPrune(), direction="maximize")
+    trial = study.ask()
+    trial.set_user_attr("position", 0)
+    with pytest.raises(optuna.TrialPruned):
+        _train(tokenizer, tmp_path, key="position-0", validation_df=_pairs(4, offset=2), trial=trial)
+    assert list(study.trials[0].intermediate_values) == [0]
+
+
+def _raise_keyboard_interrupt(*args, **kwargs):
+    raise KeyboardInterrupt
+
+
+def test_resumed_trial_asks_the_pruner_before_training_on(tokenizer, tmp_path, optimizer_steps, monkeypatch):
+    """A kill between the epoch checkpoint and the pruning decision - the repeated trial is pruned at once."""
+
+    class AlwaysPrune(optuna.pruners.BasePruner):
+        def prune(self, study, trial):
+            return True
+
+    study = optuna.create_study(pruner=AlwaysPrune(), direction="maximize")
+    killed_trial = study.ask()
+    killed_trial.set_user_attr("position", 0)
+    with monkeypatch.context() as patch, pytest.raises(KeyboardInterrupt):
+        patch.setattr(optuna.Trial, "should_prune", _raise_keyboard_interrupt)
+        _train(tokenizer, tmp_path, key="position-0", validation_df=_pairs(4, offset=2), trial=killed_trial)
+    optimizer_steps["done"] = 0
+    repeated_trial = study.ask()
+    repeated_trial.set_user_attr("position", 0)
+    with pytest.raises(optuna.TrialPruned):
+        _train(tokenizer, tmp_path, key="position-0", validation_df=_pairs(4, offset=2), trial=repeated_trial)
+    assert optimizer_steps["done"] == 0
+

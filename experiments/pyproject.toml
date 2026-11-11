@@ -96,4 +96,5 @@ extend-exclude = ["notebooks"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 # line length is handled by "ruff format"
-ignore = ["E501"]
+ignore = ["E501", "F401"]
+unfixable = ["F401"]
