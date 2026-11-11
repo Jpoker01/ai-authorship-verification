@@ -158,8 +158,11 @@ def _describe_run(
     }
 
 def _save_checkpoint(checkpoint_dir: Path, state: dict) -> None:
-    """Write the state to a temporary file, then replace the old checkpoint in one step."""
+    """Remove leftover temporary files, then write the state and replace the old checkpoint in one step."""
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    # one process per folder, so a temporary file found here was left by a killed save
+    for stale_path in checkpoint_dir.glob(f"{CHECKPOINT_FILE}.*.partial"):
+        stale_path.unlink()
     partial_path = checkpoint_dir / f"{CHECKPOINT_FILE}.{os.getpid()}.partial"
     with partial_path.open("wb") as file:
         torch.save(state, file)
