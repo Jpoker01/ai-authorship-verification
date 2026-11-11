@@ -230,3 +230,26 @@ def _build_optimizer_and_scheduler(
         num_training_steps=total_steps,
     )
     return optimizer, scheduler
+
+def _collect_checkpoint_state(
+    key: str,
+    run: dict,
+    model: PreTrainedModel,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    progress: _Progress,
+) -> dict:
+    """Collect everything a killed run needs to continue as if it had never stopped."""
+    device = next(model.parameters()).device
+    return {
+        "key": key,
+        "run": run,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "rng_cpu": torch.get_rng_state(),
+        "rng_cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
+        # epoch, step, epoch_loss, epoch_losses and pruning_f1s
+        **asdict(progress),
+    }
+
