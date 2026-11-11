@@ -253,3 +253,25 @@ def _collect_checkpoint_state(
         **asdict(progress),
     }
 
+def _restore(
+    state: dict,
+    model: PreTrainedModel,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+) -> _Progress:
+    """Load a checkpoint into the model, optimizer, scheduler and RNG, return where the run stood."""
+    device = next(model.parameters()).device
+    model.load_state_dict(state["model"])
+    # moves the AdamW state to the device of the parameters
+    optimizer.load_state_dict(state["optimizer"])
+    scheduler.load_state_dict(state["scheduler"])
+    torch.set_rng_state(state["rng_cpu"])
+    if device.type == "cuda" and state["rng_cuda"] is not None:
+        torch.cuda.set_rng_state(state["rng_cuda"], device)
+    return _Progress(
+        epoch=state["epoch"],
+        step=state["step"],
+        epoch_loss=state["epoch_loss"],
+        epoch_losses=state["epoch_losses"],
+        pruning_f1s=state["pruning_f1s"],
+    )
