@@ -7,6 +7,7 @@ continues it from its last checkpoint instead of from the first step.
 
 import hashlib
 import logging
+import math
 import os
 import pickle
 import time
@@ -34,7 +35,16 @@ CHECKPOINT_MINUTES = 60
 
 @dataclass(frozen=True)
 class TrainingSettings:
-    """Hyperparameters of one training run (one Optuna trial or the final training)."""
+    """Hyperparameters of one training run (one Optuna trial or the final training).
+
+    Attributes:
+        learning_rate: Peak learning rate of AdamW, reached after the warmup.
+        weight_decay: Weight decay of AdamW.
+        epochs: Number of passes over the training pairs.
+        batch_size: Number of pairs per training step.
+        warmup_ratio: Share of all steps in which the learning rate rises linearly.
+        seed: Seed of the order of the pairs in every epoch.
+    """
 
     learning_rate: float
     weight_decay: float
@@ -104,13 +114,14 @@ def score_pairs(
     device = next(model.parameters()).device
     was_training = model.training
     model.eval()
-    scores = []
-    argmaxes = []
-    with torch.no_grad():
-        for pair in pairs_df["pair"]:
-            logits = model(**_encode(tokenizer, [pair], device)).logits
-            scores.append(F.softmax(logits, dim=-1)[0, 1].item())
-            argmaxes.append(torch.argmax(logits, dim=-1).item())
+    with torch.inference_mode():
+        # the logits are read once at the end - reading them after every pair would make the
+        # CPU wait for the GPU instead of tokenizing the next pair in the meantime
+        logits = torch.empty((len(pairs_df), 2), device=device)
+        for row, pair in enumerate(pairs_df["pair"]):
+            logits[row] = model(**_encode(tokenizer, [pair], device)).logits[0]
+        scores = F.softmax(logits, dim=-1)[:, 1].tolist()
+        argmaxes = logits.argmax(dim=-1).tolist()
     model.train(was_training)
     return pd.DataFrame(
         {
@@ -367,7 +378,12 @@ def train_classifier(
     progress = _Progress()
     state = _load_checkpoint(checkpoint_dir, checkpoint_key, run)
     if state is not None:
-        progress = _restore(state, model, optimizer, scheduler)
+        progress = _restore(
+            state=state,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+        )
         del state  # one copy of the weights, not two
         logger.info(
             f"{checkpoint_key} resumed at epoch {progress.epoch + 1}, step {progress.step}."
@@ -378,10 +394,17 @@ def train_classifier(
             _report_and_prune(trial, pruning_f1, done_epoch)
 
     def save() -> None:
+        nonlocal last_save
         state = _collect_checkpoint_state(
-            checkpoint_key, run, model, optimizer, scheduler, progress
+            key=checkpoint_key,
+            run=run,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            progress=progress,
         )
         _save_checkpoint(checkpoint_dir, state)
+        last_save = time.monotonic()
 
     validation_scores_df = None
     model.train()
@@ -393,12 +416,15 @@ def train_classifier(
             start = progress.step * settings.batch_size
             batch_df = train_df.iloc[order[start : start + settings.batch_size]]
             progress.epoch_loss += _train_step(
-                model, tokenizer, batch_df, optimizer, scheduler
+                model=model,
+                tokenizer=tokenizer,
+                batch_df=batch_df,
+                optimizer=optimizer,
+                scheduler=scheduler,
             )
             progress.step += 1
             if time.monotonic() - last_save >= checkpoint_minutes * 60:
                 save()
-                last_save = time.monotonic()
         progress.epoch_losses.append(progress.epoch_loss / steps_per_epoch)
         if validation_df is not None:
             validation_scores_df = score_pairs(model, tokenizer, validation_df)
@@ -407,15 +433,20 @@ def train_classifier(
             f"{checkpoint_key} epoch {progress.epoch + 1} / {settings.epochs} - "
             f"loss {progress.epoch_losses[-1]:.4f}"
         )
-        progress.epoch, progress.step, progress.epoch_loss = progress.epoch + 1, 0, 0.0
+        finished_epoch = progress.epoch
+        progress.epoch += 1
+        progress.step = 0
+        progress.epoch_loss = 0.0
+        # saved before the report - a trial killed between the two replays the report on resume
         save()
-        last_save = time.monotonic()
         if trial is not None:
-            _report_and_prune(trial, progress.pruning_f1s[-1], progress.epoch - 1)
+            _report_and_prune(trial, progress.pruning_f1s[-1], finished_epoch)
 
     if validation_df is not None and validation_scores_df is None:
         # resumed after the last epoch - the scores of the restored model
         validation_scores_df = score_pairs(model, tokenizer, validation_df)
     return TrainingResult(
-        progress.epoch_losses, progress.pruning_f1s, validation_scores_df
+        epoch_losses=progress.epoch_losses,
+        pruning_f1s=progress.pruning_f1s,
+        validation_scores_df=validation_scores_df,
     )
