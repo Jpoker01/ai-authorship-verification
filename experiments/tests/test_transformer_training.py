@@ -483,10 +483,10 @@ def test_save_checkpoint_removes_stale_partial_files_before_writing(tmp_path, mo
     assert other_file_path.exists()
     assert torch.load(checkpoint_path, weights_only=True) == {"step": 7}
 
-def test_training_seconds_are_summed_over_a_restart(tokenizer, tmp_path, monkeypatch):
-    """Training steps and validation scoring count, summed over a restart; loading, saving and re-scoring do not."""
-    clock = {"now": 0.0, "steps": 0}
-    monkeypatch.setattr(transformer_training.time, "monotonic", lambda: clock["now"])
+@pytest.fixture
+def fake_clock(monkeypatch):
+    """A training step takes 50,5 s and a validation scoring 7 s (one epoch = 158,5 s); loading 300 s and saving 1000 s."""
+    clock = {"now": 0.0}
 
     def taking(function, seconds):
         def timed_function(*args, **kwargs):
@@ -495,19 +495,25 @@ def test_training_seconds_are_summed_over_a_restart(tokenizer, tmp_path, monkeyp
 
         return timed_function
 
-    original_step = torch.optim.AdamW.step
-
-    def timed_step(self, *args, **kwargs):
-        clock["steps"] += 1
-        if clock["steps"] == 5:
-            raise KeyboardInterrupt
-        clock["now"] += 50.5
-        return original_step(self, *args, **kwargs)
-
-    monkeypatch.setattr(torch.optim.AdamW, "step", timed_step)
+    monkeypatch.setattr(transformer_training.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(torch.optim.AdamW, "step", taking(torch.optim.AdamW.step, 50.5))
+    monkeypatch.setattr(transformer_training, "score_pairs", taking(transformer_training.score_pairs, 7))
     monkeypatch.setattr(transformer_training, "_load_checkpoint", taking(transformer_training._load_checkpoint, 300))
     monkeypatch.setattr(transformer_training, "_save_checkpoint", taking(transformer_training._save_checkpoint, 1000))
-    monkeypatch.setattr(transformer_training, "score_pairs", taking(transformer_training.score_pairs, 7))
+    return clock
+
+def test_training_seconds_are_summed_over_a_restart(tokenizer, tmp_path, monkeypatch, fake_clock):
+    """Training steps and validation scoring count, summed over a restart; loading, saving and re-scoring do not."""
+    steps = {"done": 0}
+    timed_step = torch.optim.AdamW.step  # already timed by fake_clock
+
+    def step_killed_at_5(self, *args, **kwargs):
+        steps["done"] += 1
+        if steps["done"] == 5:
+            raise KeyboardInterrupt  # before the step and its time
+        return timed_step(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.optim.AdamW, "step", step_killed_at_5)
     validation_df = _pairs(4, offset=2)
     with pytest.raises(KeyboardInterrupt):
         _train(tokenizer, tmp_path, checkpoint_minutes=2, validation_df=validation_df)
@@ -531,27 +537,6 @@ def _new_trial(pruner):
     """A study with one started trial."""
     study = optuna.create_study(pruner=pruner, direction="maximize")
     return study, study.ask()
-
-
-@pytest.fixture
-def fake_clock(monkeypatch):
-    """A training step takes 50,5 s and a validation scoring 7 s (one epoch = 158,5 s); loading 300 s and saving 1000 s."""
-    clock = {"now": 0.0}
-
-    def taking(function, seconds):
-        def timed_function(*args, **kwargs):
-            clock["now"] += seconds
-            return function(*args, **kwargs)
-
-        return timed_function
-
-    monkeypatch.setattr(transformer_training.time, "monotonic", lambda: clock["now"])
-    monkeypatch.setattr(torch.optim.AdamW, "step", taking(torch.optim.AdamW.step, 50.5))
-    monkeypatch.setattr(transformer_training, "score_pairs", taking(transformer_training.score_pairs, 7))
-    monkeypatch.setattr(transformer_training, "_load_checkpoint", taking(transformer_training._load_checkpoint, 300))
-    monkeypatch.setattr(transformer_training, "_save_checkpoint", taking(transformer_training._save_checkpoint, 1000))
-    return clock
-
 
 def test_finished_trial_stores_its_training_time(tokenizer, tmp_path, fake_clock):
     """A trial that is not pruned holds the time of both epochs."""
