@@ -1,10 +1,10 @@
 """Tests of avcore.transformer_training on a tiny random BERT - CPU only, no downloads."""
 
-import pytest
-
 import io
 import re
 import zipfile
+
+import pytest
 
 pytestmark = pytest.mark.cerit
 torch = pytest.importorskip("torch")
