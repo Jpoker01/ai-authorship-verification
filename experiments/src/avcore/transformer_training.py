@@ -376,7 +376,8 @@ def train_classifier(
     One process per checkpoint_dir.
 
     Args:
-        model: Freshly loaded classifier with 2 labels, already on its device.
+        model: Freshly loaded classifier with 2 labels, already on its device, before its first
+            forward pass (a short input changes the attention modules of BigBird).
         tokenizer: Tokenizer of the model.
         train_df: Training pairs with id, same and pair.
         settings: Hyperparameters of the run.
@@ -402,7 +403,7 @@ def train_classifier(
     optimizer, scheduler = _build_optimizer_and_scheduler(
         model, settings, steps_per_epoch
     )
-    run = _describe_run(model, train_df, settings, trial)
+    run = _describe_run(model, train_df, validation_df, settings, trial)
     progress = _Progress()
     state = _load_checkpoint(checkpoint_dir, checkpoint_key, run)
     if state is not None:
