@@ -106,7 +106,6 @@ def _pairs(n_pairs, offset=0):
 def _pairs_with_last_text_changed(text_index):
     """_pairs(8) with one word added to one text of the last pair."""
     pairs_df = _pairs(8)
-    last_pair = pairs_df.at[7, "pair"]
     changed_pair = list(pairs_df.at[7, "pair"])
     changed_pair[text_index] += " w1"
     pairs_df.at[7, "pair"] = changed_pair
@@ -874,3 +873,38 @@ def test_trial_pruned_in_the_replay_stores_the_time_of_the_killed_run(
         == 158.5
     )  # epoch 1 only
     assert study.trials[0].user_attrs[transformer_training.TRAINING_SECONDS_ATTR] == 317
+
+def test_train_classifier_refuses_a_checkpoint_of_the_same_key_with_other_validation_pairs(
+    tokenizer,
+    tmp_path,
+):
+    """Other validation pairs would give other pruning F1 values to replay - it raises."""
+    _train(tokenizer, tmp_path, validation_df=_pairs(4, offset=2))
+    with pytest.raises(ValueError, match="other settings or pairs"):
+        _train(tokenizer, tmp_path, validation_df=_pairs(4, offset=5))
+
+
+def test_train_classifier_refuses_a_checkpoint_of_a_model_with_a_dropout_set_after_loading(
+    tokenizer,
+    tmp_path,
+):
+    """A dropout set on a module after loading is not in the config, but it is another run - it raises."""
+    transformer_training.train_classifier(
+        _model(),
+        tokenizer,
+        _pairs(8),
+        SETTINGS,
+        tmp_path,
+        "final",
+    )
+    model = _model()
+    model.dropout.p = 0.3  # the dropout before the classification layer of BERT
+    with pytest.raises(ValueError, match="other settings or pairs"):
+        transformer_training.train_classifier(
+            model,
+            tokenizer,
+            _pairs(8),
+            SETTINGS,
+            tmp_path,
+            "final",
+        )
