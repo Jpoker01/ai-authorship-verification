@@ -6,8 +6,9 @@ continues it from its last checkpoint instead of from the first step.
 """
 
 import hashlib
-import logging
 import json
+
+import logging
 import math
 import os
 import pickle
@@ -156,6 +157,7 @@ def _sha256_pairs(pairs_df: pd.DataFrame) -> str:
 def _describe_run(
     model: PreTrainedModel,
     train_df: pd.DataFrame,
+    validation_df: pd.DataFrame | None,
     settings: TrainingSettings,
     trial: optuna.Trial | None,
 ) -> dict:
@@ -165,8 +167,13 @@ def _describe_run(
         "model": model.name_or_path,
         # holds the dropout too, when it is set through from_pretrained
         "model_config_sha256": _sha256(model.config.to_json_string()),
+        # every submodule with its settings, incl. the p of every nn.Dropout (also one set after loading)
+        "model_modules_sha256": _sha256(repr(model)),
         "train_pairs": len(train_df),
-        "train_ids_sha256": _sha256("\n".join(train_df["id"].astype(str))),
+        # the labels and texts too - a rebuilt file with the same ids is another run
+        "train_pairs_sha256": _sha256_pairs(train_df),
+        # the replayed pruning F1 values come from the validation pairs
+        "validation_pairs_sha256": None if validation_df is None else _sha256_pairs(validation_df),
         "trial_params": {} if trial is None else dict(trial.params),
     }
 
