@@ -7,6 +7,7 @@ continues it from its last checkpoint instead of from the first step.
 
 import hashlib
 import logging
+import json
 import math
 import os
 import pickle
@@ -144,6 +145,13 @@ def _epoch_order(n_pairs: int, seed: int, epoch: int) -> list[int]:
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def _sha256_pairs(pairs_df: pd.DataFrame) -> str:
+    """Hash the id, label and both texts of every pair, in order."""
+    digest = hashlib.sha256()
+    for pair_id, same, pair in pairs_df[["id", "same", "pair"]].itertuples(index=False):
+        digest.update(json.dumps([str(pair_id), bool(same), list(pair)]).encode("utf-8"))
+    return digest.hexdigest()
 
 def _describe_run(
     model: PreTrainedModel,
