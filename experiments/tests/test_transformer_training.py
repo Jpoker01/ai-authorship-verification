@@ -15,6 +15,7 @@ import pandas as pd  # noqa: E402
 from sklearn.metrics import f1_score  # noqa: E402
 from tokenizers import Tokenizer, models, pre_tokenizers, processors  # noqa: E402
 
+from transformers.optimization import get_linear_schedule_with_warmup  # noqa: E402
 from avcore import transformer_training  # noqa: E402
 from avcore.tuning import open_study, run_study  # noqa: E402
 
@@ -908,3 +909,105 @@ def test_train_classifier_refuses_a_checkpoint_of_a_model_with_a_dropout_set_aft
             tmp_path,
             "final",
         )
+
+def _trial_with(x):
+    """A started trial whose hyperparameter x is the given value."""
+    study = optuna.create_study(direction="maximize")
+    study.enqueue_trial({"x": x})
+    trial = study.ask()
+    trial.suggest_float("x", 0, 1)
+    return trial
+
+
+def test_train_classifier_refuses_a_checkpoint_of_the_same_key_with_other_trial_params(
+    tokenizer,
+    tmp_path,
+):
+    """The same position with other trial hyperparameters (e.g. a dropout the notebook sets) raises."""
+    validation_df = _pairs(4, offset=2)
+    _train(
+        tokenizer,
+        tmp_path,
+        key="position-3",
+        validation_df=validation_df,
+        trial=_trial_with(0.25),
+    )
+    with pytest.raises(ValueError, match="other settings or pairs"):
+        _train(
+            tokenizer,
+            tmp_path,
+            key="position-3",
+            validation_df=validation_df,
+            trial=_trial_with(0.75),
+        )
+
+
+def test_train_classifier_equals_the_v1_training_loop(tokenizer, tmp_path):
+    """The weights of v1 cell 48 (AdamW, warmup, zero_grad - backward - step - scheduler.step) in the seeded order."""
+    train_df = _pairs(8)
+    settings = transformer_training.TrainingSettings(
+        1e-3,
+        0.05,
+        epochs=2,
+        batch_size=3,
+        warmup_ratio=0.3,
+    )
+    model = _model()
+    transformer_training.train_classifier(
+        model,
+        tokenizer,
+        train_df,
+        settings,
+        tmp_path,
+        "final",
+    )
+
+    reference = _model()
+    optimizer = torch.optim.AdamW(
+        reference.parameters(),
+        lr=settings.learning_rate,
+        weight_decay=settings.weight_decay,
+    )
+    total_steps = 3 * settings.epochs  # 8 pairs in batches of 3
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        int(total_steps * settings.warmup_ratio),
+        total_steps,
+    )
+    reference.train()
+    for epoch in range(settings.epochs):
+        generator = torch.Generator().manual_seed(settings.seed + epoch)
+        order = torch.randperm(len(train_df), generator=generator).tolist()
+        for start in range(0, len(train_df), settings.batch_size):
+            batch_df = train_df.iloc[order[start : start + settings.batch_size]]
+            encoding = tokenizer(
+                batch_df["pair"].str[0].tolist(),
+                batch_df["pair"].str[1].tolist(),
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=4096,
+            )
+            labels = torch.tensor(batch_df["same"].astype(int).tolist())
+            loss = reference(**encoding, labels=labels).loss
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+    assert _same_weights(model, reference)
+
+
+def test_encode_truncates_both_texts_to_max_length(tokenizer, monkeypatch):
+    """Pairs are cut to MAX_LENGTH tokens, the longer text first - as v1 with 4 096."""
+    assert transformer_training.MAX_LENGTH == 4096
+    monkeypatch.setattr(transformer_training, "MAX_LENGTH", 9)
+    pair = [" ".join(["w1"] * 10), " ".join(["w2"] * 3)]
+    encoding = transformer_training._encode(tokenizer, [pair], torch.device("cpu"))
+    expected = tokenizer(
+        pair[0],
+        pair[1],
+        truncation="longest_first",
+        max_length=9,
+    )["input_ids"]
+    assert len(expected) == 9
+    assert encoding["input_ids"][0].tolist() == expected
