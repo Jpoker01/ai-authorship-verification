@@ -516,3 +516,82 @@ def test_training_seconds_are_summed_over_a_restart(tokenizer, tmp_path, monkeyp
     # 6 steps of 50,5 s and 2 validation scorings of 7 s; a finished run adds nothing
     assert resumed_result.training_seconds == 317
     assert repeated_result.training_seconds == 317
+
+class _PruneAfterEpoch(optuna.pruners.BasePruner):
+    """Prunes at the report of one epoch (counted from 0), never at another."""
+
+    def __init__(self, epoch):
+        self.epoch = epoch
+
+    def prune(self, study, trial):
+        return trial.last_step == self.epoch
+
+
+def _new_trial(pruner):
+    """A study with one started trial."""
+    study = optuna.create_study(pruner=pruner, direction="maximize")
+    return study, study.ask()
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    """A training step takes 50,5 s and a validation scoring 7 s (one epoch = 158,5 s); loading 300 s and saving 1000 s."""
+    clock = {"now": 0.0}
+
+    def taking(function, seconds):
+        def timed_function(*args, **kwargs):
+            clock["now"] += seconds
+            return function(*args, **kwargs)
+
+        return timed_function
+
+    monkeypatch.setattr(transformer_training.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(torch.optim.AdamW, "step", taking(torch.optim.AdamW.step, 50.5))
+    monkeypatch.setattr(transformer_training, "score_pairs", taking(transformer_training.score_pairs, 7))
+    monkeypatch.setattr(transformer_training, "_load_checkpoint", taking(transformer_training._load_checkpoint, 300))
+    monkeypatch.setattr(transformer_training, "_save_checkpoint", taking(transformer_training._save_checkpoint, 1000))
+    return clock
+
+
+def test_finished_trial_stores_its_training_time(tokenizer, tmp_path, fake_clock):
+    """A trial that is not pruned holds the time of both epochs."""
+    study, trial = _new_trial(optuna.pruners.NopPruner())
+    _train(tokenizer, tmp_path, key="position-0", validation_df=_pairs(4, offset=2), trial=trial)
+    assert study.trials[0].user_attrs[transformer_training.TRAINING_SECONDS_ATTR] == 317
+
+
+def test_pruned_trial_stores_its_training_time(tokenizer, tmp_path, fake_clock):
+    """A trial pruned after epoch 2 (1 counted from 0) returns no TrainingResult - the trial holds both epochs."""
+    study, trial = _new_trial(_PruneAfterEpoch(1))
+    with pytest.raises(optuna.TrialPruned):
+        _train(tokenizer, tmp_path, key="position-0", validation_df=_pairs(4, offset=2), trial=trial)
+    assert study.trials[0].user_attrs[transformer_training.TRAINING_SECONDS_ATTR] == 317
+
+
+@pytest.mark.parametrize("pruned_epoch", [0, 1])
+def test_trial_pruned_in_the_replay_stores_the_time_of_the_killed_run(
+    tokenizer, tmp_path, monkeypatch, fake_clock, pruned_epoch
+):
+    """Killed between the epoch 2 checkpoint and its report, the repeated trial is pruned at a replayed report with both epochs."""
+    original_report = transformer_training._report_and_prune
+    reports = {"done": 0}
+
+    def report_killed_at_epoch_2(*args, **kwargs):
+        reports["done"] += 1
+        if reports["done"] == 2:  # the report of epoch 2, after its checkpoint
+            raise KeyboardInterrupt
+        return original_report(*args, **kwargs)
+
+    killed_study, killed_trial = _new_trial(_PruneAfterEpoch(1))
+    with monkeypatch.context() as patch, pytest.raises(KeyboardInterrupt):
+        patch.setattr(transformer_training, "_report_and_prune", report_killed_at_epoch_2)
+        _train(tokenizer, tmp_path, key="position-0", validation_df=_pairs(4, offset=2), trial=killed_trial)
+    fake_clock["now"] += 5000  # the pod was down - that time does not count
+    study, repeated_trial = _new_trial(_PruneAfterEpoch(pruned_epoch))
+    restart_time = fake_clock["now"]
+    with pytest.raises(optuna.TrialPruned):
+        _train(tokenizer, tmp_path, key="position-0", validation_df=_pairs(4, offset=2), trial=repeated_trial)
+    assert fake_clock["now"] == restart_time + 300  # only the load - nothing is trained again
+    assert killed_study.trials[0].user_attrs[transformer_training.TRAINING_SECONDS_ATTR] == 158.5  # epoch 1 only
+    assert study.trials[0].user_attrs[transformer_training.TRAINING_SECONDS_ATTR] == 317
+
