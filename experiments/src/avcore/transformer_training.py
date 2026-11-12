@@ -84,7 +84,7 @@ def checkpoint_key_for(trial: optuna.Trial) -> str:
     """
     if "position" not in trial.user_attrs:
         raise ValueError(
-            "The trial has no position - start the study with tuning.run_study."
+            "The trial has no position - start the study with tuning.run_study.",
         )
     # trial.number changes when a crashed trial is repeated, the position does not
     return f"{trial.study.study_name}-position-{trial.user_attrs['position']}"
@@ -141,7 +141,7 @@ def score_pairs(
             "same": pairs_df["same"].to_numpy(),
             "score": scores,
             "argmax": argmaxes,
-        }
+        },
     )
 
 
@@ -160,7 +160,7 @@ def _sha256_pairs(pairs_df: pd.DataFrame) -> str:
     digest = hashlib.sha256()
     for pair_id, same, pair in pairs_df[["id", "same", "pair"]].itertuples(index=False):
         digest.update(
-            json.dumps([str(pair_id), bool(same), list(pair)]).encode("utf-8")
+            json.dumps([str(pair_id), bool(same), list(pair)]).encode("utf-8"),
         )
     return digest.hexdigest()
 
@@ -217,22 +217,24 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
     if not checkpoint_path.is_file():
         return None
     # torch.save always writes a zip; anything else would fail in torch.load with an arbitrary error
-    if not zipfile.is_zipfile(checkpoint_path):
-        raise ValueError(
-            f"{checkpoint_path} can not be read - delete it: not a torch.save file"
-        )
     try:
+        # torch.save always writes a zip; anything else would fail in torch.load with an arbitrary error
+        if not zipfile.is_zipfile(checkpoint_path):
+            raise ValueError(
+                f"{checkpoint_path} can not be read - delete it: not a torch.save file",
+            )
         # on the CPU - torch.set_rng_state takes only CPU tensors
         state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     except (
         RuntimeError,
         EOFError,
         IndexError,
+        TypeError,
         pickle.UnpicklingError,
         zipfile.BadZipFile,
     ) as error:
         raise ValueError(
-            f"{checkpoint_path} can not be read - delete it: {error}"
+            f"{checkpoint_path} can not be read - delete it: {error}",
         ) from error
     if state["key"] != key:
         logger.info(f"Checkpoint of {state['key']} ignored, it is replaced by {key}.")
@@ -240,7 +242,7 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
     if state["run"] != run:
         raise ValueError(
             f"{checkpoint_path} ({key}) was written for other settings or pairs - "
-            f"delete it if its study file was deleted: {state['run']}"
+            f"delete it if its study file was deleted: {state['run']}",
         )
     return state
 
@@ -269,6 +271,8 @@ def _check_inputs(
         raise ValueError("train_df is empty.")
     if settings.epochs < 1 or settings.batch_size < 1:
         raise ValueError(f"epochs and batch_size have to be at least 1: {settings}")
+    if validation_df is not None and validation_df.empty:
+        raise ValueError("validation_df is empty.")
     if trial is not None and validation_df is None:
         raise ValueError("Pruning needs validation_df.")
     if model.config.num_labels != 2:
@@ -313,6 +317,7 @@ def _collect_checkpoint_state(
         "scheduler": scheduler.state_dict(),
         "rng_cpu": torch.get_rng_state(),
         "rng_cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
+        "attention_type": getattr(model.base_model, "attention_type", None),
         # epoch, step, epoch_loss, epoch_losses, pruning_f1s and training_seconds
         **asdict(progress),
     }
@@ -325,7 +330,8 @@ def _restore(
     scheduler: torch.optim.lr_scheduler.LRScheduler,
 ) -> _Progress:
     """Load a checkpoint into the model, optimizer, scheduler and RNG, return where the run stood."""
-    device = next(model.parameters()).device
+    if state["attention_type"] is not None:
+        model.base_model.set_attention_type(state["attention_type"])
     model.load_state_dict(state["model"])
     # moves the AdamW state to the device of the parameters
     optimizer.load_state_dict(state["optimizer"])
@@ -344,7 +350,10 @@ def _restore(
 
 
 def _report_and_prune(
-    trial: optuna.Trial | None, pruning_f1: float, epoch: int, training_seconds: float
+    trial: optuna.Trial | None,
+    pruning_f1: float,
+    epoch: int,
+    training_seconds: float,
 ) -> None:
     """Report the pruning F1 of an epoch to the trial, if there is one.
             The training time so far is stored in the trial first - a pruned trial returns no TrainingResult.
@@ -372,7 +381,8 @@ def _train_step(
     # long - cross_entropy rejects the int32 that astype(int) gives on Windows
     labels = torch.tensor(batch_df["same"].to_numpy(), dtype=torch.long, device=device)
     loss = model(
-        **_encode(tokenizer, batch_df["pair"].tolist(), device), labels=labels
+        **_encode(tokenizer, batch_df["pair"].tolist(), device),
+        labels=labels,
     ).loss
     optimizer.zero_grad()
     loss.backward()
@@ -411,7 +421,8 @@ def train_classifier(
 
     Args:
         model: Freshly loaded classifier with 2 labels, already on its device, before its first
-            forward pass (a short input changes the attention modules of BigBird).
+            forward pass (a short input changes the attention modules of BigBird). Seed it with
+            transformers.set_seed before from_pretrained - this module seeds only the epoch order.
         tokenizer: Tokenizer of the model.
         train_df: Training pairs with id, same and pair.
         settings: Hyperparameters of the run.
@@ -426,16 +437,18 @@ def train_classifier(
         The losses, the pruning F1 values, the last validation scores and the training time.
 
     Raises:
-        ValueError: If train_df is empty, a setting is out of range, trial is given without
-            validation_df, the model has not 2 labels, or the checkpoint of this key can not be
-            read or describes another run.
+        ValueError: If train_df or validation_df is empty, a setting is out of range, trial is
+            given without validation_df, the model has not 2 labels, or the checkpoint of this
+            key can not be read or describes another run.
         optuna.TrialPruned: If the pruner stops the trial after an epoch.
     """
     _check_inputs(model, train_df, settings, validation_df, trial)
     # the last batch is smaller, as with the v1 DataLoader (drop_last=False)
     steps_per_epoch = -(-len(train_df) // settings.batch_size)
     optimizer, scheduler = _build_optimizer_and_scheduler(
-        model, settings, steps_per_epoch
+        model,
+        settings,
+        steps_per_epoch,
     )
     run = _describe_run(model, train_df, validation_df, settings, trial)
     progress = _Progress()
@@ -449,7 +462,7 @@ def train_classifier(
         )
         del state  # one copy of the weights, not two
         logger.info(
-            f"{checkpoint_key} resumed at epoch {progress.epoch + 1}, step {progress.step}."
+            f"{checkpoint_key} resumed at epoch {progress.epoch + 1}, step {progress.step}.",
         )
         # the reports of the crashed trial are hidden from the pruner - they are replayed with
         # their pruning decisions, as in the uninterrupted run
@@ -496,7 +509,7 @@ def train_classifier(
             progress.pruning_f1s.append(_compute_pruning_f1(validation_scores_df))
         logger.info(
             f"{checkpoint_key} epoch {progress.epoch + 1} / {settings.epochs} - "
-            f"loss {progress.epoch_losses[-1]:.4f}"
+            f"loss {progress.epoch_losses[-1]:.4f}",
         )
         finished_epoch = progress.epoch
         progress.epoch += 1
