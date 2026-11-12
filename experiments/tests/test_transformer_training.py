@@ -2,6 +2,10 @@
 
 import pytest
 
+import io
+import re
+import zipfile
+
 pytestmark = pytest.mark.cerit
 torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
@@ -415,3 +419,45 @@ def test_resumed_trial_asks_the_pruner_before_training_on(tokenizer, tmp_path, o
         _train(tokenizer, tmp_path, key="position-0", validation_df=_pairs(4, offset=2), trial=repeated_trial)
     assert optimizer_steps["done"] == 0
 
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"train_df": _pairs(0)}, "empty"),
+        ({"settings": transformer_training.TrainingSettings(1e-3, 0.01, epochs=0, batch_size=3, warmup_ratio=0.1)}, "at least 1"),
+        ({"settings": transformer_training.TrainingSettings(1e-3, 0.01, epochs=2, batch_size=0, warmup_ratio=0.1)}, "at least 1"),
+        ({"trial": "a trial without validation"}, "validation"),
+    ],
+)
+def test_train_classifier_rejects_invalid_inputs(tokenizer, tmp_path, changes, message):
+    """Invalid inputs raise before any training step."""
+    with pytest.raises(ValueError, match=message):
+        _train(tokenizer, tmp_path, **changes)
+
+def test_checkpoint_key_needs_the_position_of_run_study():
+    """A trial started without tuning.run_study has no position - the key would change on a repeat."""
+    trial = optuna.create_study().ask()
+    with pytest.raises(ValueError, match="run_study"):
+        transformer_training.checkpoint_key_for(trial)
+
+def test_train_classifier_rejects_a_model_without_2_labels(tokenizer, tmp_path):
+    """Only a 2-label head (0 = different author, 1 = same author) is accepted."""
+    with pytest.raises(ValueError, match="labels"):
+        transformer_training.train_classifier(_model(num_labels=3), tokenizer, _pairs(8), SETTINGS, tmp_path, "final")
+
+def _zip_not_written_by_torch() -> bytes:
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as archive:
+        archive.writestr("notes.txt", "a zip file, but not one written by torch.save")
+    return zip_buffer.getvalue()
+
+@pytest.mark.parametrize(
+    "broken_content",
+    [b"half a checkpoint", _zip_not_written_by_torch()],
+    ids=["not_a_zip", "zip_not_written_by_torch"],
+)
+def test_train_classifier_refuses_a_checkpoint_it_can_not_read(tokenizer, tmp_path, broken_content):
+    """A broken checkpoint raises and names the file - it is never ignored and trained over."""
+    checkpoint_path = tmp_path / transformer_training.CHECKPOINT_FILE
+    checkpoint_path.write_bytes(broken_content)
+    with pytest.raises(ValueError, match=re.escape(f"{checkpoint_path} can not be read")):
+        _train(tokenizer, tmp_path)
