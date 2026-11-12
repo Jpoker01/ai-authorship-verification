@@ -36,6 +36,7 @@ CHECKPOINT_FILE = "checkpoint.pt"
 CHECKPOINT_MINUTES = 60
 TRAINING_SECONDS_ATTR = "training_seconds"
 
+
 @dataclass(frozen=True)
 class TrainingSettings:
     """Hyperparameters of one training run (one Optuna trial or the final training).
@@ -75,6 +76,7 @@ class TrainingResult:
     validation_scores_df: pd.DataFrame | None
     training_seconds: float
 
+
 def checkpoint_key_for(trial: optuna.Trial) -> str:
     """Name the checkpoint of a trial by its study and position, which a repeated trial keeps.
 
@@ -82,9 +84,12 @@ def checkpoint_key_for(trial: optuna.Trial) -> str:
         ValueError: If the trial has no position, i.e. it was not started by tuning.run_study.
     """
     if "position" not in trial.user_attrs:
-        raise ValueError("The trial has no position - start the study with tuning.run_study.")
+        raise ValueError(
+            "The trial has no position - start the study with tuning.run_study."
+        )
     # trial.number changes when a crashed trial is repeated, the position does not
     return f"{trial.study.study_name}-position-{trial.user_attrs['position']}"
+
 
 def _encode(
     tokenizer: PreTrainedTokenizerBase,
@@ -101,6 +106,7 @@ def _encode(
         max_length=MAX_LENGTH,
     )
     return encoding.to(device)
+
 
 def score_pairs(
     model: PreTrainedModel,
@@ -139,20 +145,26 @@ def score_pairs(
         }
     )
 
+
 def _epoch_order(n_pairs: int, seed: int, epoch: int) -> list[int]:
     """Return the shuffled row order of an epoch, the same for the same seed and epoch."""
     generator = torch.Generator().manual_seed(seed + epoch)
     return torch.randperm(n_pairs, generator=generator).tolist()
 
+
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
 
 def _sha256_pairs(pairs_df: pd.DataFrame) -> str:
     """Hash the id, label and both texts of every pair, in order."""
     digest = hashlib.sha256()
     for pair_id, same, pair in pairs_df[["id", "same", "pair"]].itertuples(index=False):
-        digest.update(json.dumps([str(pair_id), bool(same), list(pair)]).encode("utf-8"))
+        digest.update(
+            json.dumps([str(pair_id), bool(same), list(pair)]).encode("utf-8")
+        )
     return digest.hexdigest()
+
 
 def _describe_run(
     model: PreTrainedModel,
@@ -173,9 +185,12 @@ def _describe_run(
         # the labels and texts too - a rebuilt file with the same ids is another run
         "train_pairs_sha256": _sha256_pairs(train_df),
         # the replayed pruning F1 values come from the validation pairs
-        "validation_pairs_sha256": None if validation_df is None else _sha256_pairs(validation_df),
+        "validation_pairs_sha256": None
+        if validation_df is None
+        else _sha256_pairs(validation_df),
         "trial_params": {} if trial is None else dict(trial.params),
     }
+
 
 def _save_checkpoint(checkpoint_dir: Path, state: dict) -> None:
     """Remove leftover temporary files, then write the state and replace the old checkpoint in one step."""
@@ -192,6 +207,7 @@ def _save_checkpoint(checkpoint_dir: Path, state: dict) -> None:
     # a kill during torch.save leaves the previous checkpoint intact
     os.replace(partial_path, checkpoint_dir / CHECKPOINT_FILE)
 
+
 def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
     """Return the checkpoint of this run, None if there is none or it belongs to another run.
 
@@ -203,12 +219,22 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
         return None
     # torch.save always writes a zip; anything else would fail in torch.load with an arbitrary error
     if not zipfile.is_zipfile(checkpoint_path):
-        raise ValueError(f"{checkpoint_path} can not be read - delete it: not a torch.save file")
+        raise ValueError(
+            f"{checkpoint_path} can not be read - delete it: not a torch.save file"
+        )
     try:
         # on the CPU - torch.set_rng_state takes only CPU tensors
         state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    except (RuntimeError, EOFError, IndexError, pickle.UnpicklingError, zipfile.BadZipFile) as error:
-        raise ValueError(f"{checkpoint_path} can not be read - delete it: {error}") from error
+    except (
+        RuntimeError,
+        EOFError,
+        IndexError,
+        pickle.UnpicklingError,
+        zipfile.BadZipFile,
+    ) as error:
+        raise ValueError(
+            f"{checkpoint_path} can not be read - delete it: {error}"
+        ) from error
     if state["key"] != key:
         logger.info(f"Checkpoint of {state['key']} ignored, it is replaced by {key}.")
         return None
@@ -218,6 +244,7 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
             f"delete it if its study file was deleted: {state['run']}"
         )
     return state
+
 
 @dataclass
 class _Progress:
@@ -229,6 +256,7 @@ class _Progress:
     epoch_losses: list[float] = field(default_factory=list)
     pruning_f1s: list[float] = field(default_factory=list)
     training_seconds: float = 0.0
+
 
 def _check_inputs(
     model: PreTrainedModel,
@@ -246,6 +274,7 @@ def _check_inputs(
         raise ValueError("Pruning needs validation_df.")
     if model.config.num_labels != 2:
         raise ValueError(f"The model has {model.config.num_labels} labels, not 2.")
+
 
 def _build_optimizer_and_scheduler(
     model: PreTrainedModel,
@@ -265,6 +294,7 @@ def _build_optimizer_and_scheduler(
         num_training_steps=total_steps,
     )
     return optimizer, scheduler
+
 
 def _collect_checkpoint_state(
     key: str,
@@ -287,6 +317,7 @@ def _collect_checkpoint_state(
         # epoch, step, epoch_loss, epoch_losses, pruning_f1s and training_seconds
         **asdict(progress),
     }
+
 
 def _restore(
     state: dict,
@@ -312,9 +343,10 @@ def _restore(
         training_seconds=state["training_seconds"],
     )
 
+
 def _report_and_prune(
-        trial: optuna.Trial | None, pruning_f1: float, epoch: int,
-        training_seconds: float) -> None:
+    trial: optuna.Trial | None, pruning_f1: float, epoch: int, training_seconds: float
+) -> None:
     """Report the pruning F1 of an epoch to the trial, if there is one.
             The training time so far is stored in the trial first - a pruned trial returns no TrainingResult.
 
@@ -327,6 +359,7 @@ def _report_and_prune(
     trial.report(pruning_f1, epoch)
     if trial.should_prune():
         raise optuna.TrialPruned()
+
 
 def _train_step(
     model: PreTrainedModel,
@@ -348,6 +381,7 @@ def _train_step(
     scheduler.step()
     return loss.item()
 
+
 def _compute_pruning_f1(validation_scores_df: pd.DataFrame) -> float:
     """Return the weighted F1 of the argmax labels, the value the pruner compares."""
     pruning_f1 = f1_score(
@@ -356,6 +390,7 @@ def _compute_pruning_f1(validation_scores_df: pd.DataFrame) -> float:
         average="weighted",
     )
     return float(pruning_f1)
+
 
 def train_classifier(
     model: PreTrainedModel,
@@ -421,6 +456,7 @@ def train_classifier(
         # their pruning decisions, as in the uninterrupted run
         for done_epoch, pruning_f1 in enumerate(progress.pruning_f1s):
             _report_and_prune(trial, pruning_f1, done_epoch, progress.training_seconds)
+
     def save() -> None:
         nonlocal last_save
         # only the time up to a save counts - a restart repeats the work done after it
@@ -471,8 +507,10 @@ def train_classifier(
         save()
         if trial is not None:
             _report_and_prune(
-                trial, progress.pruning_f1s[-1], finished_epoch,
-                progress.training_seconds
+                trial,
+                progress.pruning_f1s[-1],
+                finished_epoch,
+                progress.training_seconds,
             )
     if validation_df is not None and validation_scores_df is None:
         # resumed after the last epoch - the scores of the restored model

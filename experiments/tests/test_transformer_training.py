@@ -875,6 +875,7 @@ def test_trial_pruned_in_the_replay_stores_the_time_of_the_killed_run(
     )  # epoch 1 only
     assert study.trials[0].user_attrs[transformer_training.TRAINING_SECONDS_ATTR] == 317
 
+
 def test_train_classifier_refuses_a_checkpoint_of_the_same_key_with_other_validation_pairs(
     tokenizer,
     tmp_path,
@@ -909,6 +910,7 @@ def test_train_classifier_refuses_a_checkpoint_of_a_model_with_a_dropout_set_aft
             tmp_path,
             "final",
         )
+
 
 def _trial_with(x):
     """A started trial whose hyperparameter x is the given value."""

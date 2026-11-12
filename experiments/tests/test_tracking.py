@@ -33,6 +33,7 @@ def _git(repo_dir, *args):
         capture_output=True,
     )
 
+
 @pytest.fixture(autouse=True)
 def isolated_environment():
     """Restore os.environ and the tracking URI that the tested functions change."""
@@ -40,6 +41,7 @@ def isolated_environment():
     with mock.patch.dict(os.environ):
         yield
     mlflow.set_tracking_uri(tracking_uri)
+
 
 @pytest.fixture
 def project_dir(tmp_path):
@@ -61,10 +63,14 @@ def project_dir(tmp_path):
     _git(repo_dir, "push", "-q", "origin", "HEAD")
     return project
 
+
 @pytest.fixture
 def context():
     """A small run context, as collect_run_context returns it."""
-    return tracking.RunContext(environment={"commit": "abc"}, packages={"pandas": "2.3.3"})
+    return tracking.RunContext(
+        environment={"commit": "abc"}, packages={"pandas": "2.3.3"}
+    )
+
 
 @pytest.fixture
 def experiment(tmp_path):
@@ -74,6 +80,7 @@ def experiment(tmp_path):
         "test_v2", artifact_location=(tmp_path / "artifacts").as_uri()
     )
     return "test_v2"
+
 
 def _predictions_df():
     """A valid predictions table with two pairs."""
@@ -92,6 +99,7 @@ def _write(run_dir, context, **changes):
     }
     tracking.write_run_files(run_dir, context=context, **{**arguments, **changes})
 
+
 def test_collect_run_context_records_commit_lock_and_data_hashes(project_dir, tmp_path):
     """The context holds HEAD, the LF sha256 of uv.lock and the sha256 of each data file."""
     data_path = tmp_path / "train.jsonl"
@@ -105,15 +113,24 @@ def test_collect_run_context_records_commit_lock_and_data_hashes(project_dir, tm
         text=True,
     ).stdout.strip()
     assert run_context.environment["commit"] == head
-    assert run_context.environment["uv_lock_sha256"] == hashlib.sha256(b"lock\n").hexdigest()
+    assert (
+        run_context.environment["uv_lock_sha256"]
+        == hashlib.sha256(b"lock\n").hexdigest()
+    )
     assert (
         run_context.environment["data_sha256.train.jsonl"]
         == hashlib.sha256(b'{"id": "a"}\n').hexdigest()
     )
-    expected_keys = {"started_at", "python_version", "cgroup_cpu_max",
-                     "version.mlflow", "gpu_name"}
+    expected_keys = {
+        "started_at",
+        "python_version",
+        "cgroup_cpu_max",
+        "version.mlflow",
+        "gpu_name",
+    }
     assert expected_keys <= run_context.environment.keys()
     assert "pandas" in run_context.packages
+
 
 @pytest.mark.parametrize("change", ["modified", "untracked_hidden", "unpushed"])
 def test_collect_run_context_rejects_an_unclean_repo(project_dir, change):
@@ -130,6 +147,7 @@ def test_collect_run_context_rejects_an_unclean_repo(project_dir, change):
             project_dir, [], package_dir=project_dir / "src" / "avcore"
         )
 
+
 def test_collect_run_context_rejects_a_package_outside_the_project(
     project_dir, tmp_path
 ):
@@ -138,6 +156,7 @@ def test_collect_run_context_rejects_a_package_outside_the_project(
         tracking.collect_run_context(
             project_dir, [], package_dir=tmp_path / "other" / "avcore"
         )
+
 
 @pytest.mark.parametrize(
     ("run_name", "changes"),
@@ -166,11 +185,21 @@ def test_collect_run_context_rejects_a_package_outside_the_project(
         ("run_v2", {"tables": {"predictions-test": _predictions_df().assign(id="a")}}),
         ("run_v2", {"tables": {"test_predictions": _predictions_df()}}),
         ("run_v2", {"tables": {"predictions-test": _predictions_df().assign(same=2)}}),
-        ("run_v2", {"tables": {"predictions-test": _predictions_df().assign(score=float("nan"))}}),
+        (
+            "run_v2",
+            {
+                "tables": {
+                    "predictions-test": _predictions_df().assign(score=float("nan"))
+                }
+            },
+        ),
         ("run", {}),
         ("run x_v2", {}),
         ("run_v2", {"figures": {"sub/confusion_matrix": None}}),
-        ("run_v2", {"tables": {"trials": pd.DataFrame({"note": [np.bytes_(b"x" * 101)]})}}),
+        (
+            "run_v2",
+            {"tables": {"trials": pd.DataFrame({"note": [np.bytes_(b"x" * 101)]})}},
+        ),
     ],
 )
 def test_write_run_files_rejects_invalid_input_and_writes_nothing(
@@ -181,11 +210,13 @@ def test_write_run_files_rejects_invalid_input_and_writes_nothing(
         _write(tmp_path / run_name, context, **changes)
     assert list(tmp_path.iterdir()) == []
 
+
 def test_write_run_files_refuses_an_existing_folder(tmp_path, context):
     """An existing run folder is never written into."""
     (tmp_path / "run_v2").mkdir()
     with pytest.raises(FileExistsError):
         _write(tmp_path / "run_v2", context)
+
 
 def test_log_run_files_uploads_the_saved_files(tmp_path, context, experiment):
     """The run gets the folder name, the context and params, the metrics and every file."""
@@ -222,6 +253,7 @@ def test_log_run_files_returns_the_finished_run_on_a_second_call(
         len(mlflow.search_runs(experiment_names=[experiment], output_format="list"))
         == 1
     )
+
 
 @pytest.mark.parametrize("change", ["extra", "modified"])
 def test_log_run_files_refuses_files_outside_the_manifest(
@@ -261,6 +293,7 @@ def test_connect_tracking_requires_databricks_credentials(tmp_path, monkeypatch)
     with pytest.raises(RuntimeError, match="DATABRICKS_TOKEN"):
         tracking.connect_tracking(env_path)
 
+
 def test_env_example_lists_the_required_variables():
     """The .env template lists exactly the credentials that connect_tracking requires."""
     lines = (
@@ -271,13 +304,16 @@ def test_env_example_lists_the_required_variables():
     names = [line.split("=")[0] for line in lines if line and not line.startswith("#")]
     assert names == tracking.DATABRICKS_VARIABLES
 
+
 def test_log_run_files_uploads_again_after_a_failed_upload(
     tmp_path, context, experiment, monkeypatch
 ):
     """A failed upload does not count - the next call uploads the folder as a new run."""
     run_dir = tmp_path / "longformer_v2"
     _write(run_dir, context)
-    monkeypatch.setattr(mlflow, "log_artifacts", mock.Mock(side_effect=OSError("no network")))
+    monkeypatch.setattr(
+        mlflow, "log_artifacts", mock.Mock(side_effect=OSError("no network"))
+    )
     with pytest.raises(OSError):
         tracking.log_run_files(run_dir, experiment)
     monkeypatch.undo()
@@ -285,6 +321,7 @@ def test_log_run_files_uploads_again_after_a_failed_upload(
     runs = mlflow.search_runs(experiment_names=[experiment], output_format="list")
     assert sorted(run.info.status for run in runs) == ["FAILED", "FINISHED"]
     assert mlflow.get_run(run_id).info.status == "FINISHED"
+
 
 def test_collect_run_context_rejects_repeated_data_file_names(project_dir, tmp_path):
     """Two data files with the same name would share one data_sha256 key."""
@@ -296,6 +333,7 @@ def test_collect_run_context_rejects_repeated_data_file_names(project_dir, tmp_p
         tracking.collect_run_context(
             project_dir, data_paths, package_dir=project_dir / "src" / "avcore"
         )
+
 
 def test_write_run_files_accepts_missing_values_and_times(tmp_path, context):
     """None, NaT and times - as in an Optuna trials table - are plain cells."""
@@ -310,14 +348,20 @@ def test_write_run_files_accepts_missing_values_and_times(tmp_path, context):
     _write(tmp_path / "run_v2", context, tables={"trials": trials_df})
     assert (tmp_path / "run_v2" / "trials.csv").is_file()
 
+
 def test_connect_tracking_loads_the_env_file_over_the_shell(tmp_path, monkeypatch):
     """The .env values win over stale shell variables and run URLs are not printed."""
     monkeypatch.setenv("DATABRICKS_TOKEN", "stale")
     env_path = tmp_path / ".env"
-    env_path.write_text("DATABRICKS_HOST=https://example.invalid\nDATABRICKS_TOKEN=fresh\n")
-    tracking.connect_tracking(env_path, tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}")
+    env_path.write_text(
+        "DATABRICKS_HOST=https://example.invalid\nDATABRICKS_TOKEN=fresh\n"
+    )
+    tracking.connect_tracking(
+        env_path, tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}"
+    )
     assert os.environ["DATABRICKS_TOKEN"] == "fresh"
     assert os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] == "true"
+
 
 def test_connect_tracking_requires_the_env_file(tmp_path):
     """A missing .env file raises instead of loading nothing."""
@@ -325,6 +369,7 @@ def test_connect_tracking_requires_the_env_file(tmp_path):
         tracking.connect_tracking(
             tmp_path / ".env", tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}"
         )
+
 
 def test_write_run_files_rejects_a_relative_folder(tmp_path, context, monkeypatch):
     """A relative run folder raises and nothing is written into the current folder."""

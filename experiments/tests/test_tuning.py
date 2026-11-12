@@ -219,6 +219,7 @@ def test_open_study_rejects_a_missing_folder(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="does not exist"):
         open_study(tmp_path / "missing" / "toy_v2.db")
 
+
 def test_run_study_stops_after_n_trials_failed_trials(tmp_path: Path) -> None:
     """Failed trials stop the study at n_trials, also when it is run again."""
 
