@@ -2,6 +2,7 @@
 
 import io
 import re
+import struct
 import zipfile
 
 import pytest
@@ -626,12 +627,20 @@ def test_resumed_trial_asks_the_pruner_before_training_on(
             "at least 1",
         ),
         ({"trial": "a trial without validation"}, "validation"),
+        ({"validation_df": _pairs(0)}, "validation_df is empty"),
     ],
 )
-def test_train_classifier_rejects_invalid_inputs(tokenizer, tmp_path, changes, message):
+def test_train_classifier_rejects_invalid_inputs(
+    tokenizer,
+    tmp_path,
+    optimizer_steps,
+    changes,
+    message,
+):
     """Invalid inputs raise before any training step."""
     with pytest.raises(ValueError, match=message):
         _train(tokenizer, tmp_path, **changes)
+    assert optimizer_steps["done"] == 0
 
 
 def test_checkpoint_key_needs_the_position_of_run_study():
@@ -680,6 +689,35 @@ def test_train_classifier_refuses_a_checkpoint_it_can_not_read(
     ):
         _train(tokenizer, tmp_path)
 
+@pytest.mark.parametrize(
+    "find_byte",
+    [
+        # the high byte of the tensor size in the pickle - torch.load fails
+        lambda content: content.index(struct.pack("<I", 70_000)) + 3,
+        # the disk number of the zip64 end locator - zipfile.is_zipfile fails
+        lambda content: content.rindex(b"PK\x06\x07") + 4,
+    ],
+    ids=["tensor_size", "zip_disk_number"],
+)
+def test_train_classifier_refuses_a_checkpoint_with_a_damaged_byte(
+    tokenizer,
+    tmp_path,
+    find_byte,
+):
+    """A torch.save file with one damaged byte raises the ValueError naming the file, not the raw error."""
+    transformer_training._save_checkpoint(
+        tmp_path,
+        {"key": "final", "run": {}, "w": torch.zeros(70_000)},
+    )
+    checkpoint_path = tmp_path / transformer_training.CHECKPOINT_FILE
+    content = bytearray(checkpoint_path.read_bytes())
+    content[find_byte(content)] ^= 0xFF
+    checkpoint_path.write_bytes(content)
+    with pytest.raises(
+        ValueError,
+        match=re.escape(f"{checkpoint_path} can not be read"),
+    ):
+        _train(tokenizer, tmp_path)
 
 def test_save_checkpoint_removes_stale_partial_files_before_writing(
     tmp_path,
@@ -1034,3 +1072,65 @@ def test_encode_truncates_both_texts_to_max_length(tokenizer, monkeypatch):
     )["input_ids"]
     assert len(expected) == 9
     assert encoding["input_ids"][0].tolist() == expected
+
+def _bigbird_model():
+    """Tiny block-sparse BigBird classifier with the same weights on every call."""
+    torch.manual_seed(0)
+    config = transformers.BigBirdConfig(
+        vocab_size=len(WORDS) + 4,
+        hidden_size=16,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        intermediate_size=32,
+        max_position_embeddings=64,
+        # an input of at most (5 + 2 * 1) * 2 = 14 tokens switches it to full attention
+        block_size=2,
+        num_random_blocks=1,
+        num_labels=2,
+        pad_token_id=0,
+    )
+    return transformers.BigBirdForSequenceClassification(config).eval()
+
+
+def test_resumed_bigbird_keeps_the_full_attention_of_the_killed_run(
+    tokenizer,
+    tmp_path,
+    optimizer_steps,
+):
+    """A short validation pair switches BigBird to full attention; the resumed run keeps it and ends with the same weights."""
+    short_pair_df = pd.DataFrame([{"id": "short", "same": True, "pair": ["w1", "w2"]}])
+    validation_df = pd.concat([_pairs(3, offset=1), short_pair_df], ignore_index=True)
+    reference_model = _bigbird_model()
+    transformer_training.train_classifier(
+        reference_model,
+        tokenizer,
+        _pairs(8),
+        SETTINGS,
+        tmp_path / "reference",
+        "final",
+        validation_df=validation_df,
+    )
+    optimizer_steps.update(done=0, crash_at=5)  # step 5 = the second step of epoch 2
+    with pytest.raises(KeyboardInterrupt):
+        transformer_training.train_classifier(
+            _bigbird_model(),
+            tokenizer,
+            _pairs(8),
+            SETTINGS,
+            tmp_path / "run",
+            "final",
+            validation_df=validation_df,
+            checkpoint_minutes=0,
+        )
+    resumed_model = _bigbird_model()
+    transformer_training.train_classifier(
+        resumed_model,
+        tokenizer,
+        _pairs(8),
+        SETTINGS,
+        tmp_path / "run",
+        "final",
+        validation_df=validation_df,
+        checkpoint_minutes=0,
+    )
+    assert _same_weights(resumed_model, reference_model)

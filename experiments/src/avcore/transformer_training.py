@@ -216,7 +216,6 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
     checkpoint_path = checkpoint_dir / CHECKPOINT_FILE
     if not checkpoint_path.is_file():
         return None
-    # torch.save always writes a zip; anything else would fail in torch.load with an arbitrary error
     try:
         # torch.save always writes a zip; anything else would fail in torch.load with an arbitrary error
         if not zipfile.is_zipfile(checkpoint_path):
@@ -317,6 +316,7 @@ def _collect_checkpoint_state(
         "scheduler": scheduler.state_dict(),
         "rng_cpu": torch.get_rng_state(),
         "rng_cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
+        # BigBird switches to full attention for good after a short input; not in state_dict
         "attention_type": getattr(model.base_model, "attention_type", None),
         # epoch, step, epoch_loss, epoch_losses, pruning_f1s and training_seconds
         **asdict(progress),
@@ -330,6 +330,7 @@ def _restore(
     scheduler: torch.optim.lr_scheduler.LRScheduler,
 ) -> _Progress:
     """Load a checkpoint into the model, optimizer, scheduler and RNG, return where the run stood."""
+    device = next(model.parameters()).device
     if state["attention_type"] is not None:
         model.base_model.set_attention_type(state["attention_type"])
     model.load_state_dict(state["model"])
