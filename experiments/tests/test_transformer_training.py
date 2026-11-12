@@ -14,8 +14,8 @@ import optuna  # noqa: E402
 import pandas as pd  # noqa: E402
 from sklearn.metrics import f1_score  # noqa: E402
 from tokenizers import Tokenizer, models, pre_tokenizers, processors  # noqa: E402
-
 from transformers.optimization import get_linear_schedule_with_warmup  # noqa: E402
+
 from avcore import transformer_training  # noqa: E402
 from avcore.tuning import open_study, run_study  # noqa: E402
 

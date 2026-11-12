@@ -7,7 +7,6 @@ continues it from its last checkpoint instead of from the first step.
 
 import hashlib
 import json
-
 import logging
 import math
 import os
