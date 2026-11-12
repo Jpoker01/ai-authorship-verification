@@ -689,6 +689,7 @@ def test_train_classifier_refuses_a_checkpoint_it_can_not_read(
     ):
         _train(tokenizer, tmp_path)
 
+
 @pytest.mark.parametrize(
     "find_byte",
     [
@@ -718,6 +719,7 @@ def test_train_classifier_refuses_a_checkpoint_with_a_damaged_byte(
         match=re.escape(f"{checkpoint_path} can not be read"),
     ):
         _train(tokenizer, tmp_path)
+
 
 def test_save_checkpoint_removes_stale_partial_files_before_writing(
     tmp_path,
@@ -1072,6 +1074,7 @@ def test_encode_truncates_both_texts_to_max_length(tokenizer, monkeypatch):
     )["input_ids"]
     assert len(expected) == 9
     assert encoding["input_ids"][0].tolist() == expected
+
 
 def _bigbird_model():
     """Tiny block-sparse BigBird classifier with the same weights on every call."""
