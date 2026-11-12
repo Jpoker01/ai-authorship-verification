@@ -461,3 +461,58 @@ def test_train_classifier_refuses_a_checkpoint_it_can_not_read(tokenizer, tmp_pa
     checkpoint_path.write_bytes(broken_content)
     with pytest.raises(ValueError, match=re.escape(f"{checkpoint_path} can not be read")):
         _train(tokenizer, tmp_path)
+
+def test_save_checkpoint_removes_stale_partial_files_before_writing(tmp_path, monkeypatch):
+    """Temporary files left by killed saves are deleted before the new state is written; the checkpoint stays."""
+    transformer_training._save_checkpoint(tmp_path, {"step": 1})
+    checkpoint_path = tmp_path / transformer_training.CHECKPOINT_FILE
+    stale_paths = [tmp_path / f"{transformer_training.CHECKPOINT_FILE}.{pid}.partial" for pid in (999998, 999999)]
+    for stale_path in stale_paths:
+        stale_path.write_bytes(b"half a checkpoint")
+    other_file_path = tmp_path / "notes.partial"
+    other_file_path.write_bytes(b"not a checkpoint")
+    original_save = torch.save
+
+    def checking_save(obj, file, *args, **kwargs):
+        assert not any(stale_path.exists() for stale_path in stale_paths)
+        assert checkpoint_path.is_file()  # the old checkpoint survives until the new one replaces it
+        return original_save(obj, file, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "save", checking_save)
+    transformer_training._save_checkpoint(tmp_path, {"step": 7})
+    assert other_file_path.exists()
+    assert torch.load(checkpoint_path, weights_only=True) == {"step": 7}
+
+def test_training_seconds_are_summed_over_a_restart(tokenizer, tmp_path, monkeypatch):
+    """Training steps and validation scoring count, summed over a restart; loading, saving and re-scoring do not."""
+    clock = {"now": 0.0, "steps": 0}
+    monkeypatch.setattr(transformer_training.time, "monotonic", lambda: clock["now"])
+
+    def taking(function, seconds):
+        def timed_function(*args, **kwargs):
+            clock["now"] += seconds
+            return function(*args, **kwargs)
+
+        return timed_function
+
+    original_step = torch.optim.AdamW.step
+
+    def timed_step(self, *args, **kwargs):
+        clock["steps"] += 1
+        if clock["steps"] == 5:
+            raise KeyboardInterrupt
+        clock["now"] += 50.5
+        return original_step(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.optim.AdamW, "step", timed_step)
+    monkeypatch.setattr(transformer_training, "_load_checkpoint", taking(transformer_training._load_checkpoint, 300))
+    monkeypatch.setattr(transformer_training, "_save_checkpoint", taking(transformer_training._save_checkpoint, 1000))
+    monkeypatch.setattr(transformer_training, "score_pairs", taking(transformer_training.score_pairs, 7))
+    validation_df = _pairs(4, offset=2)
+    with pytest.raises(KeyboardInterrupt):
+        _train(tokenizer, tmp_path, checkpoint_minutes=2, validation_df=validation_df)
+    _, resumed_result = _train(tokenizer, tmp_path, checkpoint_minutes=2, validation_df=validation_df)
+    _, repeated_result = _train(tokenizer, tmp_path, checkpoint_minutes=2, validation_df=validation_df)
+    # 6 steps of 50,5 s and 2 validation scorings of 7 s; a finished run adds nothing
+    assert resumed_result.training_seconds == 317
+    assert repeated_result.training_seconds == 317
