@@ -912,6 +912,26 @@ def test_train_classifier_refuses_a_checkpoint_of_a_model_with_a_dropout_set_aft
         )
 
 
+def test_train_classifier_refuses_a_checkpoint_of_a_model_with_another_config(
+    tokenizer,
+    tmp_path,
+):
+    """A killed run restarted with a changed model config does not resume the checkpoint - it raises."""
+    _train(tokenizer, tmp_path)
+    model = _model()
+    # as if passed to from_pretrained - only the config hash sees it, repr(model) does not
+    model.config.initializer_range = 0.05
+    with pytest.raises(ValueError, match="other settings or pairs"):
+        transformer_training.train_classifier(
+            model,
+            tokenizer,
+            _pairs(8),
+            SETTINGS,
+            tmp_path,
+            "final",
+        )
+
+
 def _trial_with(x):
     """A started trial whose hyperparameter x is the given value."""
     study = optuna.create_study(direction="maximize")
@@ -1001,7 +1021,7 @@ def test_train_classifier_equals_the_v1_training_loop(tokenizer, tmp_path):
 
 def test_encode_truncates_both_texts_to_max_length(tokenizer, monkeypatch):
     """Pairs are cut to MAX_LENGTH tokens, the longer text first - as v1 with 4 096."""
-    assert transformer_training.MAX_LENGTH == 4096
+    pair = [" ".join(["w1"] * 10), " ".join(["w2"] * 6)]
     monkeypatch.setattr(transformer_training, "MAX_LENGTH", 9)
     pair = [" ".join(["w1"] * 10), " ".join(["w2"] * 3)]
     encoding = transformer_training._encode(tokenizer, [pair], torch.device("cpu"))
