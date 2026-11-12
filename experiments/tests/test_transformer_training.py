@@ -1021,9 +1021,10 @@ def test_train_classifier_equals_the_v1_training_loop(tokenizer, tmp_path):
 
 def test_encode_truncates_both_texts_to_max_length(tokenizer, monkeypatch):
     """Pairs are cut to MAX_LENGTH tokens, the longer text first - as v1 with 4 096."""
-    pair = [" ".join(["w1"] * 10), " ".join(["w2"] * 6)]
+    assert transformer_training.MAX_LENGTH == 4096
     monkeypatch.setattr(transformer_training, "MAX_LENGTH", 9)
-    pair = [" ".join(["w1"] * 10), " ".join(["w2"] * 3)]
+    # 10 + 6 words into 6 places - only longest_first cuts both texts (to 3 + 3)
+    pair = [" ".join(["w1"] * 10), " ".join(["w2"] * 6)]
     encoding = transformer_training._encode(tokenizer, [pair], torch.device("cpu"))
     expected = tokenizer(
         pair[0],
