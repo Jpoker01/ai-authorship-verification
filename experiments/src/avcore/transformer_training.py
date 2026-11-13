@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import pickle
+import struct
 import time
 import zipfile
 from collections.abc import Sequence
@@ -125,15 +126,29 @@ def score_pairs(
     """
     device = next(model.parameters()).device
     was_training = model.training
+    # None for BERT, Longformer and ModernBERT - BigBird switches to full attention for good at a short input
+    configured_attention = getattr(model.config, "attention_type", None)
+    attention_before = getattr(model.base_model, "attention_type", None)
+    # a switch of the BigBird attention builds new layers, and their initialisation draws from this RNG
+    rng_state = torch.get_rng_state()
     model.eval()
     with torch.inference_mode():
         # the logits are read once at the end - reading them after every pair would make the
         # CPU wait for the GPU instead of tokenizing the next pair in the meantime
         logits = torch.empty((len(pairs_df), 2), device=device)
         for row, pair in enumerate(pairs_df["pair"]):
+            if configured_attention is not None:
+                # every pair in the configured attention, as the saved model scores it - a score
+                # depends only on the weights and its own pair, not on the pairs before it
+                model.base_model.set_attention_type(configured_attention)
             logits[row] = model(**_encode(tokenizer, [pair], device)).logits[0]
         scores = F.softmax(logits, dim=-1)[:, 1].tolist()
         argmaxes = logits.argmax(dim=-1).tolist()
+        if attention_before is not None:
+            # the training goes on in the attention it had before the scoring
+            model.base_model.set_attention_type(attention_before)
+            # the dropout of the training goes on as if no pair had been scored
+        torch.set_rng_state(rng_state)
     model.train(was_training)
     return pd.DataFrame(
         {
@@ -167,15 +182,22 @@ def _sha256_pairs(pairs_df: pd.DataFrame) -> str:
 
 def _describe_run(
     model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
     train_df: pd.DataFrame,
     validation_df: pd.DataFrame | None,
     settings: TrainingSettings,
     trial: optuna.Trial | None,
 ) -> dict:
     """Return everything that decides the trained weights - a checkpoint resumes only an equal run."""
-    return {
+    run = {
         **asdict(settings),
         "model": model.name_or_path,
+        # the vocabulary, not the folder it was loaded from (another path in every pod)
+        "tokenizer_vocab_sha256": _sha256(
+            json.dumps(tokenizer.get_vocab(), sort_keys=True)),
+        "truncation_side": tokenizer.truncation_side,
+        "padding_side": tokenizer.padding_side,
+        "max_length": MAX_LENGTH,
         # holds the dropout too, when it is set through from_pretrained
         "model_config_sha256": _sha256(model.config.to_json_string()),
         # every submodule with its settings, incl. the p of every nn.Dropout (also one set after loading)
@@ -189,6 +211,13 @@ def _describe_run(
         else _sha256_pairs(validation_df),
         "trial_params": {} if trial is None else dict(trial.params),
     }
+    try:
+        # plain Python values only - torch.load(weights_only=True) refuses a checkpoint with a
+        # numpy number in it, which torch.save writes without an error
+        return json.loads(json.dumps(run, allow_nan=False))
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"The trial params have to be plain Python values: {error}") from error
 
 
 def _save_checkpoint(checkpoint_dir: Path, state: dict) -> None:
@@ -217,33 +246,31 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
     if not checkpoint_path.is_file():
         return None
     try:
-        # torch.save always writes a zip; anything else would fail in torch.load with an arbitrary error
-        if not zipfile.is_zipfile(checkpoint_path):
-            raise ValueError(
-                f"{checkpoint_path} can not be read - delete it: not a torch.save file",
-            )
+        # torch.save always writes a zip - opening anything else as one raises BadZipFile
+        with zipfile.ZipFile(checkpoint_path):
+            pass
         # on the CPU - torch.set_rng_state takes only CPU tensors
-        state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        state = torch.load(checkpoint_path, map_location="cpu",
+                           weights_only=True)
+        # a damaged pickle can load as another object - no dict, or a dict without these entries
+        state_key, state_run = state["key"], state["run"]
+        # an OSError (disk, permissions) is not caught - the file may be fine, "delete it" would be wrong
     except (
-        RuntimeError,
-        EOFError,
-        IndexError,
-        TypeError,
-        pickle.UnpicklingError,
-        zipfile.BadZipFile,
+            RuntimeError,
+            KeyError,
+            EOFError,
+            AttributeError,
+            ValueError,
+            AssertionError,
+            struct.error,
+            IndexError,
+            TypeError,
+            pickle.UnpicklingError,
+            zipfile.BadZipFile,
     ) as error:
         raise ValueError(
             f"{checkpoint_path} can not be read - delete it: {error}",
         ) from error
-    if state["key"] != key:
-        logger.info(f"Checkpoint of {state['key']} ignored, it is replaced by {key}.")
-        return None
-    if state["run"] != run:
-        raise ValueError(
-            f"{checkpoint_path} ({key}) was written for other settings or pairs - "
-            f"delete it if its study file was deleted: {state['run']}",
-        )
-    return state
 
 
 @dataclass
@@ -266,6 +293,12 @@ def _check_inputs(
     trial: optuna.Trial | None,
 ) -> None:
     """Raise a ValueError for an input that can not be trained on."""
+    # torch.save writes a numpy number (also into the optimizer state), but
+    # torch.load(weights_only=True) then refuses the whole checkpoint
+    if any(type(value) not in (int, float) for value in
+           asdict(settings).values()):
+        raise ValueError(
+            f"The settings have to be plain Python numbers: {settings}")
     if train_df.empty:
         raise ValueError("train_df is empty.")
     if settings.epochs < 1 or settings.batch_size < 1:
@@ -451,7 +484,7 @@ def train_classifier(
         settings,
         steps_per_epoch,
     )
-    run = _describe_run(model, train_df, validation_df, settings, trial)
+    run = _describe_run(model, tokenizer, train_df, validation_df, settings, trial)
     progress = _Progress()
     state = _load_checkpoint(checkpoint_dir, checkpoint_key, run)
     if state is not None:
