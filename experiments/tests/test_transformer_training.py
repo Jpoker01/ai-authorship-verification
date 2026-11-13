@@ -1,10 +1,10 @@
 """Tests of avcore.transformer_training on a tiny random BERT - CPU only, no downloads."""
 
-import types
+import dataclasses
 import io
 import re
 import struct
-import dataclasses
+import types
 import zipfile
 
 import pytest
