@@ -147,7 +147,7 @@ def score_pairs(
         if attention_before is not None:
             # the training goes on in the attention it had before the scoring
             model.base_model.set_attention_type(attention_before)
-            # the dropout of the training goes on as if no pair had been scored
+        # the dropout of the training goes on as if no pair had been scored
         torch.set_rng_state(rng_state)
     model.train(was_training)
     return pd.DataFrame(
@@ -271,6 +271,16 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
         raise ValueError(
             f"{checkpoint_path} can not be read - delete it: {error}",
         ) from error
+    if state_key != key:
+        logger.info(
+            f"Checkpoint of {state_key} ignored, it is replaced by {key}.")
+        return None
+    if state_run != run:
+        raise ValueError(
+            f"{checkpoint_path} ({key}) was written for other settings or pairs - "
+            f"delete it if its study file was deleted: {state_run}",
+        )
+    return state
 
 
 @dataclass
