@@ -693,7 +693,7 @@ def test_train_classifier_refuses_a_checkpoint_it_can_not_read(
 @pytest.mark.parametrize(
     "find_byte",
     [
-        # the high byte of the tensor size in the pickle - torch.load fails
+        # the high byte of the storage size in the pickle (the first 70 000) - torch.load fails
         lambda content: content.index(struct.pack("<I", 70_000)) + 3,
         # the disk number of the zip64 end locator - zipfile.is_zipfile fails
         lambda content: content.rindex(b"PK\x06\x07") + 4,
