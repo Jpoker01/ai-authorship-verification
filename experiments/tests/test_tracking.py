@@ -103,7 +103,7 @@ def _write(run_dir, context, **changes):
 def test_collect_run_context_records_commit_lock_and_data_hashes(project_dir, tmp_path):
     """The context holds HEAD, the LF sha256 of uv.lock and the sha256 of each data file."""
     data_path = tmp_path / "train.jsonl"
-    data_path.write_text('{"id": "a"}\n')
+    data_path.write_bytes(b'{"id": "a"}\n')
     run_context = tracking.collect_run_context(
         project_dir, [data_path], package_dir=project_dir / "src" / "avcore"
     )
