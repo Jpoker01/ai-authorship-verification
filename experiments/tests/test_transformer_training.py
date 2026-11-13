@@ -698,7 +698,7 @@ def test_train_classifier_refuses_a_checkpoint_it_can_not_read(
         # the disk number of the zip64 end locator - zipfile.is_zipfile fails
         lambda content: content.rindex(b"PK\x06\x07") + 4,
     ],
-    ids=["tensor_size", "zip_disk_number"],
+    ids=["storage_size", "zip_disk_number"],
 )
 def test_train_classifier_refuses_a_checkpoint_with_a_damaged_byte(
     tokenizer,
