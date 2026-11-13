@@ -4,7 +4,7 @@ import types
 import io
 import re
 import struct
-import types
+import dataclasses
 import zipfile
 
 import pytest
@@ -12,8 +12,8 @@ import pytest
 pytestmark = pytest.mark.cerit
 torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
-import numpy as np  # noqa: E402
 
+import numpy as np  # noqa: E402
 import optuna  # noqa: E402
 import pandas as pd  # noqa: E402
 from sklearn.metrics import f1_score  # noqa: E402
@@ -1244,7 +1244,7 @@ def test_resumed_bigbird_keeps_the_full_attention_of_the_killed_run(
     transformer_training.train_classifier(
         reference_model,
         tokenizer,
-        _pairs(8),
+        train_df,
         SETTINGS,
         tmp_path / "reference",
         "final",
@@ -1255,7 +1255,7 @@ def test_resumed_bigbird_keeps_the_full_attention_of_the_killed_run(
         transformer_training.train_classifier(
             _bigbird_model(),
             tokenizer,
-            _train_df,
+            train_df,
             SETTINGS,
             tmp_path / "run",
             "final",
@@ -1337,3 +1337,4 @@ def test_score_pairs_builds_no_gradients(tokenizer):
     calls = []
     transformer_training.score_pairs(_forward_recording_model(calls), tokenizer, _pairs(2))
     assert [grad_enabled for _, grad_enabled in calls] == [False, False]
+
