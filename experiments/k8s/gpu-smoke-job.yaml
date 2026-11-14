@@ -57,13 +57,17 @@ spec:
               export LD_LIBRARY_PATH="$(printf '%s' "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -vx /opt/conda/lib | paste -sd: -)"
               echo "LD_LIBRARY_PATH=[$LD_LIBRARY_PATH]"
               exec "$HOME/diploma_thesis/experiments/.venv/bin/python" - <<'PY'
+              import ctypes
               import torch
               print(torch.__version__, torch.version.cuda, torch.cuda.is_available())
               print(torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0), torch.cuda.get_arch_list())
               print("cudnn", torch.backends.cudnn.version())
               torch.nn.functional.conv2d(torch.randn(1, 1, 8, 8, device="cuda"), torch.randn(1, 1, 3, 3, device="cuda"))
               print("libcudnn from", sorted({line.split()[-1] for line in open("/proc/self/maps") if "libcudnn" in line}))
-              print("nccl", torch.cuda.nccl.version(), "libnccl from", sorted({line.split()[-1] for line in open("/proc/self/maps") if "libnccl" in line}))
+              nccl_paths = sorted({line.split()[-1] for line in open("/proc/self/maps") if "libnccl" in line})
+              nccl_runtime = ctypes.c_int()
+              ctypes.CDLL(nccl_paths[0]).ncclGetVersion(ctypes.byref(nccl_runtime))
+              print("nccl build", torch.cuda.nccl.version(), "runtime", nccl_runtime.value, "libnccl from", nccl_paths)
               x = torch.randn(4096, 4096, device="cuda")
               print("matmul ok", (x @ x).sum().item())
               PY
