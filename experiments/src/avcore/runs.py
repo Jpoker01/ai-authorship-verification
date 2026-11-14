@@ -214,3 +214,45 @@ def find_finished_run(run_dir: Path, params: Mapping[str, object]) -> bool:
             "Move it away."
         )
     return True
+
+def remove_unfinished_run_dir(run_dir: Path) -> None:
+    """Remove the half-written result folder that a killed save left behind.
+
+    Args:
+        run_dir: Result folder of the run; its unfinished copy has the suffix .partial.
+    """
+    partial_dir = run_dir.with_name(f"{run_dir.name}.partial")
+    if partial_dir.exists():
+        shutil.rmtree(partial_dir)
+
+def build_predictions(
+    pairs_df: pd.DataFrame, scores_df: pd.DataFrame, threshold: float
+) -> pd.DataFrame:
+    """Return the prediction table of every pair - same author when score >= threshold.
+
+    Args:
+        pairs_df: The pairs that were scored, each id once.
+        scores_df: Scores of pairs_df with the columns id, same and score.
+        threshold: Classification threshold.
+
+    Returns:
+        One row per pair with id, same, score and pred, 0 = different author, 1 = same author.
+
+    Raises:
+        ValueError: If an id of pairs_df repeats, scores_df does not hold exactly the pairs of
+            pairs_df in their order, or a score is NaN.
+    """
+    if not pairs_df["id"].is_unique:
+        raise ValueError("The pairs hold a repeated id.")
+    if scores_df["id"].tolist() != pairs_df["id"].tolist():
+        raise ValueError("The scores do not hold every pair once, in the same order.")
+    if scores_df["score"].isna().any():
+        raise ValueError("A score is NaN - it would be predicted as a different author.")
+    return pd.DataFrame(
+        {
+            "id": scores_df["id"],
+            "same": scores_df["same"].astype(int),
+            "score": scores_df["score"],
+            "pred": (scores_df["score"] >= threshold).astype(int),
+        }
+    )
