@@ -182,3 +182,35 @@ def sum_training_seconds(study: optuna.Study, seconds_attr: str) -> float:
     return sum(
         (trial.user_attrs.get(seconds_attr, 0.0) for trial in counted_trials), start=0.0
     )
+
+def find_finished_run(run_dir: Path, params: Mapping[str, object]) -> bool:
+    """Say whether the result folder of the run exists - a finished run is not repeated.
+
+    Args:
+        run_dir: Result folder of the run.
+        params: The params of the run that are known so far; the folder has to hold their values.
+
+    Returns:
+        True if the folder exists and holds these params.
+
+    Raises:
+        RuntimeError: If run_dir exists without a params file, or holds another value of one
+            of these params.
+    """
+    if not run_dir.exists():
+        return False
+    params_path = run_dir / tracking.PARAMS_FILE
+    if not params_path.is_file():
+        raise RuntimeError(f"{run_dir} is not a finished run folder - move it away.")
+    saved_params = json.loads(params_path.read_text(encoding="utf-8"))
+    changes = [
+        f"{key}: {saved_params.get(key, MISSING)} -> {value}"
+        for key, value in params.items()
+        if saved_params.get(key, MISSING) != str(value)
+    ]
+    if changes:
+        raise RuntimeError(
+            f"{run_dir} holds the results of other settings - {'; '.join(changes)}. "
+            "Move it away."
+        )
+    return True
