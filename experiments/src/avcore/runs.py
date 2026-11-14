@@ -203,11 +203,11 @@ def find_finished_run(run_dir: Path, params: Mapping[str, object]) -> bool:
     if not params_path.is_file():
         raise RuntimeError(f"{run_dir} is not a finished run folder - move it away.")
     saved_params = json.loads(params_path.read_text(encoding="utf-8"))
-    changes = [
-        f"{key}: {saved_params.get(key, MISSING)} -> {value}"
-        for key, value in params.items()
-        if saved_params.get(key, MISSING) != str(value)
-    ]
+    changes = []
+    for key, value in params.items():
+        saved_value = saved_params.get(key, MISSING)
+        if saved_value != str(value):
+            changes.append(f"{key}: {saved_value} -> {value}")
     if changes:
         raise RuntimeError(
             f"{run_dir} holds the results of other settings - {'; '.join(changes)}. "
