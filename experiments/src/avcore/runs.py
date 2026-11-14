@@ -156,3 +156,29 @@ def select_best_trial(study: optuna.Study) -> FrozenTrial:
     if not complete_trials:
         raise ValueError(f"Study {study.study_name} holds no complete trial.")
     return max(complete_trials, key=lambda trial: (trial.value, -trial.number))
+
+def sum_training_seconds(study: optuna.Study, seconds_attr: str) -> float:
+    """Return the training time of the search in seconds.
+
+    A crashed attempt is repeated, so its time is inside the repeated trial and not added.
+
+    Args:
+        study: Finished study whose trials hold their training time.
+        seconds_attr: Name of the user attribute that holds the training time of a trial.
+
+    Returns:
+        The sum over the complete, pruned and failed trials that did not crash.
+
+    Raises:
+        ValueError: If no such trial holds seconds_attr.
+    """
+    counted_trials = [
+        trial
+        for trial in study.get_trials(deepcopy=False, states=tuning.ENDED_STATES)
+        if not trial.user_attrs.get("crashed")
+    ]
+    if not any(seconds_attr in trial.user_attrs for trial in counted_trials):
+        raise ValueError(f"Study {study.study_name} holds no trial with {seconds_attr}.")
+    return sum(
+        (trial.user_attrs.get(seconds_attr, 0.0) for trial in counted_trials), start=0.0
+    )
