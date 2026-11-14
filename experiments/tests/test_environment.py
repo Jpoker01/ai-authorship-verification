@@ -32,3 +32,4 @@ def test_bigbird_tokenizer_gives_the_expected_ids() -> None:
 
     # [CLS] ▁first ▁text [SEP] ▁second ▁text [SEP]
     assert encoding["input_ids"][0] == [65, 818, 2521, 66, 1319, 2521, 66]
+

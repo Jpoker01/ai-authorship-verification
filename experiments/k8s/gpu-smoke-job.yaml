@@ -63,6 +63,7 @@ spec:
               print("cudnn", torch.backends.cudnn.version())
               torch.nn.functional.conv2d(torch.randn(1, 1, 8, 8, device="cuda"), torch.randn(1, 1, 3, 3, device="cuda"))
               print("libcudnn from", sorted({line.split()[-1] for line in open("/proc/self/maps") if "libcudnn" in line}))
+              print("nccl", torch.cuda.nccl.version(), "libnccl from", sorted({line.split()[-1] for line in open("/proc/self/maps") if "libnccl" in line}))
               x = torch.randn(4096, 4096, device="cuda")
               print("matmul ok", (x @ x).sum().item())
               PY
