@@ -67,6 +67,7 @@ environments = [
 # transformer and llm need different torch builds; never install both into one environment
 conflicts = [[{ group = "transformer" }, { group = "llm" }]]
 # xgboost's nvidia-nccl-cu12 and torch's nvidia-nccl-cu13 write the same libnccl.so.2 into one venv
+# safe to drop - xgboost runs on the CPU here and loads NCCL only for distributed GPU training
 exclude-dependencies = [
     { package = { name = "xgboost" }, dependencies = ["nvidia-nccl-cu12"] },
 ]

@@ -34,3 +34,20 @@ def test_bigbird_tokenizer_gives_the_expected_ids() -> None:
     # [CLS] ▁first ▁text [SEP] ▁second ▁text [SEP]
     assert encoding["input_ids"][0] == [65, 818, 2521, 66, 1319, 2521, 66]
 
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "allenai/longformer-base-4096",
+        "google/bigbird-roberta-base",
+        "answerdotai/ModernBERT-large",
+    ],
+)
+def test_tokenizer_truncates_a_long_pair_to_4096_tokens(model_id: str) -> None:
+    """A pair longer than 4096 tokens is cut to exactly 4096 tokens, the way the notebooks call the tokenizer."""
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_id)
+    long_text = "word " * 5_000
+
+    encoding = tokenizer([long_text], [long_text], truncation=True, max_length=4096)
+
+    assert len(encoding["input_ids"][0]) == 4096
