@@ -139,3 +139,20 @@ def store_study_settings(study: optuna.Study, settings: Mapping[str, object]) ->
     current_settings = _settings_as_text(settings)
     if STUDY_SETTINGS_ATTR not in study.user_attrs:
         study.set_user_attr(STUDY_SETTINGS_ATTR, current_settings)
+
+def select_best_trial(study: optuna.Study) -> FrozenTrial:
+    """Return the complete trial with the highest value, the earliest one if two are equal.
+
+    Args:
+        study: Finished study.
+
+    Returns:
+        The best trial.
+
+    Raises:
+        ValueError: If the study holds no complete trial.
+    """
+    complete_trials = study.get_trials(deepcopy=False, states=(TrialState.COMPLETE,))
+    if not complete_trials:
+        raise ValueError(f"Study {study.study_name} holds no complete trial.")
+    return max(complete_trials, key=lambda trial: (trial.value, -trial.number))
