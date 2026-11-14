@@ -46,6 +46,8 @@ transformer = [
     "transformers<5",        # notebooks use the 4.x Trainer API
     "accelerate",
     "huggingface_hub",
+    "sentencepiece",         # BigBird ships only spiece.model, the fast tokenizer is converted from it
+    "protobuf",              # the BigBird converter needs it too
 ]
 # vLLM pins its own torch version, so it lives in a separate group
 llm = [

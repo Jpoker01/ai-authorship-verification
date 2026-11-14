@@ -782,6 +782,8 @@ llm = [
 transformer = [
     { name = "accelerate" },
     { name = "huggingface-hub" },
+    { name = "protobuf" },
+    { name = "sentencepiece" },
     { name = "torch", version = "2.14.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" } },
     { name = "transformers" },
 ]
@@ -825,6 +827,8 @@ llm = [
 transformer = [
     { name = "accelerate" },
     { name = "huggingface-hub" },
+    { name = "protobuf" },
+    { name = "sentencepiece" },
     { name = "torch", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "dt-experiments", group = "transformer" } },
     { name = "transformers", specifier = "<5" },
 ]
