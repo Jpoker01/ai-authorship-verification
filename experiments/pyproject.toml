@@ -66,6 +66,9 @@ environments = [
 ]
 # transformer and llm need different torch builds; never install both into one environment
 conflicts = [[{ group = "transformer" }, { group = "llm" }]]
+exclude-dependencies = [
+    { package = { name = "xgboost" }, dependencies = ["nvidia-nccl-cu12"] },
+]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130", group = "transformer" }]
