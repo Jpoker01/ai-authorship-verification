@@ -74,3 +74,33 @@ def test_select_best_trial_ignores_pruned_and_failed_trials() -> None:
     ]
     study = build_study(trials)
     assert runs.select_best_trial(study).number == 2
+
+def test_select_best_trial_without_a_complete_trial_raises() -> None:
+    """A study with pruned trials only has no best trial."""
+    trials = [create_trial(state=TrialState.PRUNED, intermediate_values={0: 0.5})]
+    study = build_study(trials)
+    with pytest.raises(ValueError, match="holds no complete trial"):
+        runs.select_best_trial(study)
+
+def test_sum_training_seconds_adds_complete_pruned_and_failed_trials() -> None:
+    """The search time is the sum over the complete, pruned and failed trials."""
+    trials = [
+        create_trial(state=TrialState.COMPLETE, value=1.0, user_attrs={SECONDS_ATTR: 10.0}),
+        create_trial(
+            state=TrialState.PRUNED,
+            intermediate_values={0: 0.5},
+            user_attrs={SECONDS_ATTR: 5.0},
+        ),
+        create_trial(state=TrialState.FAIL, user_attrs={SECONDS_ATTR: 3.0}),
+    ]
+    study = build_study(trials)
+    assert runs.sum_training_seconds(study, SECONDS_ATTR) == 18.0
+
+def test_sum_training_seconds_leaves_out_a_crashed_attempt() -> None:
+    """The time of a crashed attempt is not added - the repeated trial holds it."""
+    trials = [
+        create_trial(state=TrialState.FAIL, user_attrs={SECONDS_ATTR: 7.0, "crashed": True}),
+        create_trial(state=TrialState.COMPLETE, value=1.0, user_attrs={SECONDS_ATTR: 10.0}),
+    ]
+    study = build_study(trials)
+    assert runs.sum_training_seconds(study, SECONDS_ATTR) == 10.0
