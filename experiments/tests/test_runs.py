@@ -416,6 +416,7 @@ def test_find_finished_run_with_the_saved_params_is_true(tmp_path: Path) -> None
     write_run_dir(run_dir, saved_params)
     assert runs.find_finished_run(run_dir, params) is True
 
+
 def test_store_study_settings_rejects_a_setting_whose_text_is_not_stable(
     tmp_path: Path,
 ) -> None:
@@ -425,6 +426,7 @@ def test_store_study_settings_rejects_a_setting_whose_text_is_not_stable(
     with pytest.raises(TypeError):
         runs.store_study_settings(study, {"search.ids": {1, 2}})
     assert runs.STUDY_SETTINGS_ATTR not in study.user_attrs
+
 
 def test_find_finished_run_compares_only_the_given_params(tmp_path: Path) -> None:
     """Before the tuning only a part of the params is known - the rest is not compared."""
@@ -444,6 +446,7 @@ def test_find_finished_run_with_other_params_raises(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="final_epochs: 2 -> 3"):
         runs.find_finished_run(run_dir, params)
 
+
 def test_find_finished_run_with_a_param_the_folder_lacks_raises(tmp_path: Path) -> None:
     """A result folder without one of the given params is not this run."""
     run_dir = tmp_path / "run_v2"
@@ -452,6 +455,7 @@ def test_find_finished_run_with_a_param_the_folder_lacks_raises(tmp_path: Path) 
     write_run_dir(run_dir, saved_params)
     with pytest.raises(RuntimeError, match="final_epochs: <missing> -> 2"):
         runs.find_finished_run(run_dir, params)
+
 
 def test_find_finished_run_without_a_params_file_raises(tmp_path: Path) -> None:
     """A folder of the run name without a params file is not a finished run."""
@@ -486,6 +490,7 @@ def test_remove_unfinished_run_dir_without_a_partial_folder_does_nothing(
     runs.remove_unfinished_run_dir(run_dir)
     assert list(tmp_path.iterdir()) == []
 
+
 def test_sum_training_seconds_with_only_a_crashed_time_raises() -> None:
     """The time of a crashed attempt alone does not make the study report 0 seconds."""
     trials = [
@@ -498,4 +503,3 @@ def test_sum_training_seconds_with_only_a_crashed_time_raises() -> None:
     study = build_study(trials)
     with pytest.raises(ValueError, match="holds no trial with training_seconds"):
         runs.sum_training_seconds(study, SECONDS_ATTR)
-
