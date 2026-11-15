@@ -284,9 +284,13 @@ def test_check_study_settings_names_a_new_setting(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "settings",
-    [{"search.ids": {1, 2}}, {7: "seven"}, {"search.lr": (pd.NA,)}],
-    ids=["a_set", "an_int_key", "a_non_plain_item"],
+    [
+        {"search.ids": {1, 2}},
+        {7: "seven"},
+        {"search.lr": (pd.NA,)},
+        {"search.lr": pd.Series([1e-5]).iloc[0]},
+    ],
+    ids=["a_set", "an_int_key", "a_non_plain_item", "a_numpy_float"],
 )
 def test_check_study_settings_rejects_a_setting_whose_text_is_not_stable(
     tmp_path: Path,
@@ -411,6 +415,15 @@ def test_find_finished_run_with_the_saved_params_is_true(tmp_path: Path) -> None
     write_run_dir(run_dir, saved_params)
     assert runs.find_finished_run(run_dir, params) is True
 
+def test_store_study_settings_rejects_a_setting_whose_text_is_not_stable(
+    tmp_path: Path,
+) -> None:
+    """Settings that could not be compared later are refused before they are stored."""
+    study_path = tmp_path / "optuna_study_unstable_store.db"
+    study = tuning.open_study(study_path, seed=SEED)
+    with pytest.raises(TypeError):
+        runs.store_study_settings(study, {"search.ids": {1, 2}})
+    assert runs.STUDY_SETTINGS_ATTR not in study.user_attrs
 
 def test_find_finished_run_compares_only_the_given_params(tmp_path: Path) -> None:
     """Before the tuning only a part of the params is known - the rest is not compared."""
@@ -471,3 +484,17 @@ def test_remove_unfinished_run_dir_without_a_partial_folder_does_nothing(
     run_dir = tmp_path / "run_v2"
     runs.remove_unfinished_run_dir(run_dir)
     assert list(tmp_path.iterdir()) == []
+
+def test_sum_training_seconds_with_only_a_crashed_time_raises() -> None:
+    """The time of a crashed attempt alone does not make the study report 0 seconds."""
+    trials = [
+        create_trial(
+            state=TrialState.FAIL,
+            user_attrs={SECONDS_ATTR: 7.0, "crashed": True},
+        ),
+        create_trial(state=TrialState.COMPLETE, value=1.0),
+    ]
+    study = build_study(trials)
+    with pytest.raises(ValueError, match="holds no trial with training_seconds"):
+        runs.sum_training_seconds(study, SECONDS_ATTR)
+
