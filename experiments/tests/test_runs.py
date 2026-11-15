@@ -336,3 +336,22 @@ def test_check_study_settings_never_writes_into_the_file(tmp_path: Path) -> None
     with pytest.raises(sqlalchemy.exc.OperationalError, match="readonly"):
         runs.check_study_settings(study_path, settings)
     assert sha256_of(study_path) == sha256_before
+
+
+def test_check_study_settings_rejects_trials_without_settings(tmp_path: Path) -> None:
+    """A study that holds trials but no settings was not started by the notebook."""
+    study_path = tmp_path / "optuna_study_foreign.db"
+    settings = {"n_trials": 12}
+    study = tuning.open_study(study_path, seed=SEED)
+    study.ask()
+    with pytest.raises(RuntimeError, match="holds trials but no settings"):
+        runs.check_study_settings(study_path, settings)
+
+def test_check_study_settings_passes_for_a_study_without_trials_and_settings(
+    tmp_path: Path,
+) -> None:
+    """A run killed between creating the study and storing the settings can start again."""
+    study_path = tmp_path / "optuna_study_empty.db"
+    settings = {"n_trials": 12}
+    tuning.open_study(study_path, seed=SEED)
+    runs.check_study_settings(study_path, settings)
