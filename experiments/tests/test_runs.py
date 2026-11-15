@@ -151,3 +151,34 @@ def test_build_predictions_has_the_prediction_columns_and_integer_labels() -> No
     assert pd.api.types.is_integer_dtype(predictions_df["pred"])
     assert predictions_df["same"].tolist() == [1, 0]
     assert predictions_df["score"].tolist() == [0.9, 0.2]
+
+@pytest.mark.parametrize(
+    "score_ids",
+    [["x", "y", "z"], ["a", "b"], ["b", "a", "c"]],
+    ids=["other_pairs", "a_missing_pair", "another_order"],
+)
+def test_build_predictions_rejects_scores_that_are_not_the_pairs(score_ids: list[str]) -> None:
+    """Scores of other pairs, of fewer pairs or in another order are refused."""
+    pairs_df = pd.DataFrame({"id": ["a", "b", "c"]})
+    scores_df = pd.DataFrame(
+        {"id": score_ids, "same": [0] * len(score_ids), "score": [0.5] * len(score_ids)}
+    )
+    threshold = 0.5
+    with pytest.raises(ValueError, match="do not hold every pair once"):
+        runs.build_predictions(pairs_df, scores_df, threshold)
+
+def test_build_predictions_rejects_a_repeated_id() -> None:
+    """A pair that appears twice is refused, also when the scores repeat it the same way."""
+    pairs_df = pd.DataFrame({"id": ["a", "b", "a"]})
+    scores_df = pd.DataFrame({"id": ["a", "b", "a"], "same": [0, 1, 0], "score": [0.3, 0.7, 0.3]})
+    threshold = 0.5
+    with pytest.raises(ValueError, match="repeated id"):
+        runs.build_predictions(pairs_df, scores_df, threshold)
+
+def test_build_predictions_rejects_a_nan_score() -> None:
+    """A NaN score is refused instead of being predicted as a different author."""
+    pairs_df = pd.DataFrame({"id": ["a", "b"]})
+    scores_df = pd.DataFrame({"id": ["a", "b"], "same": [0, 1], "score": [float("nan"), 0.7]})
+    threshold = 0.5
+    with pytest.raises(ValueError, match="NaN"):
+        runs.build_predictions(pairs_df, scores_df, threshold)
