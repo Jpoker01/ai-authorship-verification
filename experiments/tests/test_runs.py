@@ -430,6 +430,14 @@ def test_find_finished_run_with_other_params_raises(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="final_epochs: 2 -> 3"):
         runs.find_finished_run(run_dir, params)
 
+def test_find_finished_run_with_a_param_the_folder_lacks_raises(tmp_path: Path) -> None:
+    """A result folder without one of the given params is not this run."""
+    run_dir = tmp_path / "run_v2"
+    saved_params = {"seed": "42"}
+    params = {"seed": 42, "final_epochs": 2}
+    write_run_dir(run_dir, saved_params)
+    with pytest.raises(RuntimeError, match="final_epochs: <missing> -> 2"):
+        runs.find_finished_run(run_dir, params)
 
 def test_find_finished_run_without_a_params_file_raises(tmp_path: Path) -> None:
     """A folder of the run name without a params file is not a finished run."""
