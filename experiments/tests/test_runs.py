@@ -75,6 +75,7 @@ def test_select_best_trial_ignores_pruned_and_failed_trials() -> None:
     study = build_study(trials)
     assert runs.select_best_trial(study).number == 2
 
+
 def test_select_best_trial_without_a_complete_trial_raises() -> None:
     """A study with pruned trials only has no best trial."""
     trials = [create_trial(state=TrialState.PRUNED, intermediate_values={0: 0.5})]
@@ -82,10 +83,15 @@ def test_select_best_trial_without_a_complete_trial_raises() -> None:
     with pytest.raises(ValueError, match="holds no complete trial"):
         runs.select_best_trial(study)
 
+
 def test_sum_training_seconds_adds_complete_pruned_and_failed_trials() -> None:
     """The search time is the sum over the complete, pruned and failed trials."""
     trials = [
-        create_trial(state=TrialState.COMPLETE, value=1.0, user_attrs={SECONDS_ATTR: 10.0}),
+        create_trial(
+            state=TrialState.COMPLETE,
+            value=1.0,
+            user_attrs={SECONDS_ATTR: 10.0},
+        ),
         create_trial(
             state=TrialState.PRUNED,
             intermediate_values={0: 0.5},
@@ -96,32 +102,51 @@ def test_sum_training_seconds_adds_complete_pruned_and_failed_trials() -> None:
     study = build_study(trials)
     assert runs.sum_training_seconds(study, SECONDS_ATTR) == 18.0
 
+
 def test_sum_training_seconds_leaves_out_a_crashed_attempt() -> None:
     """The time of a crashed attempt is not added - the repeated trial holds it."""
     trials = [
-        create_trial(state=TrialState.FAIL, user_attrs={SECONDS_ATTR: 7.0, "crashed": True}),
-        create_trial(state=TrialState.COMPLETE, value=1.0, user_attrs={SECONDS_ATTR: 10.0}),
+        create_trial(
+            state=TrialState.FAIL,
+            user_attrs={SECONDS_ATTR: 7.0, "crashed": True},
+        ),
+        create_trial(
+            state=TrialState.COMPLETE,
+            value=1.0,
+            user_attrs={SECONDS_ATTR: 10.0},
+        ),
     ]
     study = build_study(trials)
     assert runs.sum_training_seconds(study, SECONDS_ATTR) == 10.0
+
 
 def test_sum_training_seconds_leaves_out_a_running_trial() -> None:
     """A trial that is still running has not ended, so its time is not counted yet."""
     trials = [
         create_trial(state=TrialState.RUNNING, user_attrs={SECONDS_ATTR: 99.0}),
-        create_trial(state=TrialState.COMPLETE, value=1.0, user_attrs={SECONDS_ATTR: 10.0}),
+        create_trial(
+            state=TrialState.COMPLETE,
+            value=1.0,
+            user_attrs={SECONDS_ATTR: 10.0},
+        ),
     ]
     study = build_study(trials)
     assert runs.sum_training_seconds(study, SECONDS_ATTR) == 10.0
+
 
 def test_sum_training_seconds_counts_a_trial_without_a_time_as_zero() -> None:
     """A trial that failed before its first epoch has no stored time."""
     trials = [
         create_trial(state=TrialState.FAIL),
-        create_trial(state=TrialState.COMPLETE, value=1.0, user_attrs={SECONDS_ATTR: 4.0}),
+        create_trial(
+            state=TrialState.COMPLETE,
+            value=1.0,
+            user_attrs={SECONDS_ATTR: 4.0},
+        ),
     ]
     study = build_study(trials)
     assert runs.sum_training_seconds(study, SECONDS_ATTR) == 4.0
+
 
 def test_sum_training_seconds_without_any_stored_time_raises() -> None:
     """A study whose trials never stored the attribute does not report 0 seconds."""
@@ -130,19 +155,28 @@ def test_sum_training_seconds_without_any_stored_time_raises() -> None:
     with pytest.raises(ValueError, match="holds no trial with training_seconds"):
         runs.sum_training_seconds(study, SECONDS_ATTR)
 
+
 def test_build_predictions_score_equal_to_the_threshold_is_same_author() -> None:
     """A pair is predicted as the same author when its score is at least the threshold."""
     pairs_df = pd.DataFrame({"id": ["a", "b", "c"]})
-    scores_df = pd.DataFrame({"id": ["a", "b", "c"], "same": [0, 1, 1], "score": [0.3, 0.5, 0.7]})
+    scores_df = pd.DataFrame(
+        {"id": ["a", "b", "c"], "same": [0, 1, 1], "score": [0.3, 0.5, 0.7]},
+    )
     threshold = 0.5
     predictions_df = runs.build_predictions(pairs_df, scores_df, threshold)
     assert predictions_df["pred"].tolist() == [0, 1, 1]
+
 
 def test_build_predictions_has_the_prediction_columns_and_integer_labels() -> None:
     """The table has exactly the columns of a prediction table, both labels as integers."""
     pairs_df = pd.DataFrame({"id": ["a", "b"]})
     scores_df = pd.DataFrame(
-        {"id": ["a", "b"], "same": [True, False], "score": [0.9, 0.2], "argmax": [1, 0]}
+        {
+            "id": ["a", "b"],
+            "same": [True, False],
+            "score": [0.9, 0.2],
+            "argmax": [1, 0],
+        },
     )
     threshold = 0.5
     predictions_df = runs.build_predictions(pairs_df, scores_df, threshold)
@@ -152,33 +186,74 @@ def test_build_predictions_has_the_prediction_columns_and_integer_labels() -> No
     assert predictions_df["same"].tolist() == [1, 0]
     assert predictions_df["score"].tolist() == [0.9, 0.2]
 
+
 @pytest.mark.parametrize(
     "score_ids",
     [["x", "y", "z"], ["a", "b"], ["b", "a", "c"]],
     ids=["other_pairs", "a_missing_pair", "another_order"],
 )
-def test_build_predictions_rejects_scores_that_are_not_the_pairs(score_ids: list[str]) -> None:
+def test_build_predictions_rejects_scores_that_are_not_the_pairs(
+    score_ids: list[str],
+) -> None:
     """Scores of other pairs, of fewer pairs or in another order are refused."""
     pairs_df = pd.DataFrame({"id": ["a", "b", "c"]})
     scores_df = pd.DataFrame(
-        {"id": score_ids, "same": [0] * len(score_ids), "score": [0.5] * len(score_ids)}
+        {
+            "id": score_ids,
+            "same": [0] * len(score_ids),
+            "score": [0.5] * len(score_ids),
+        },
     )
     threshold = 0.5
     with pytest.raises(ValueError, match="do not hold every pair once"):
         runs.build_predictions(pairs_df, scores_df, threshold)
 
+
 def test_build_predictions_rejects_a_repeated_id() -> None:
     """A pair that appears twice is refused, also when the scores repeat it the same way."""
     pairs_df = pd.DataFrame({"id": ["a", "b", "a"]})
-    scores_df = pd.DataFrame({"id": ["a", "b", "a"], "same": [0, 1, 0], "score": [0.3, 0.7, 0.3]})
+    scores_df = pd.DataFrame(
+        {"id": ["a", "b", "a"], "same": [0, 1, 0], "score": [0.3, 0.7, 0.3]},
+    )
     threshold = 0.5
     with pytest.raises(ValueError, match="repeated id"):
         runs.build_predictions(pairs_df, scores_df, threshold)
 
+
 def test_build_predictions_rejects_a_nan_score() -> None:
     """A NaN score is refused instead of being predicted as a different author."""
     pairs_df = pd.DataFrame({"id": ["a", "b"]})
-    scores_df = pd.DataFrame({"id": ["a", "b"], "same": [0, 1], "score": [float("nan"), 0.7]})
+    scores_df = pd.DataFrame(
+        {"id": ["a", "b"], "same": [0, 1], "score": [float("nan"), 0.7]},
+    )
     threshold = 0.5
     with pytest.raises(ValueError, match="NaN"):
         runs.build_predictions(pairs_df, scores_df, threshold)
+
+
+def test_check_study_settings_passes_without_a_study_file(tmp_path: Path) -> None:
+    """A study that does not exist yet has no settings to compare."""
+    study_path = tmp_path / "optuna_study_new.db"
+    settings = {"n_trials": 12}
+    runs.check_study_settings(study_path, settings)
+    assert not study_path.exists()
+
+
+def test_check_study_settings_passes_for_the_stored_settings(tmp_path: Path) -> None:
+    """The settings the study was started with are accepted, also as numbers and tuples."""
+    study_path = tmp_path / "optuna_study_equal.db"
+    settings = {"n_trials": 12, "search.lr": (1e-6, 5e-5), "smoke": True}
+    study = tuning.open_study(study_path, seed=SEED)
+    runs.store_study_settings(study, settings)
+    runs.check_study_settings(study_path, settings)
+
+
+def test_check_study_settings_names_a_changed_setting(tmp_path: Path) -> None:
+    """A setting that differs from the stored one stops the run and is named."""
+    study_path = tmp_path / "optuna_study_changed.db"
+    stored_settings = {"n_trials": 12, "model_id": "model-a"}
+    changed_settings = {"n_trials": 13, "model_id": "model-a"}
+    study = tuning.open_study(study_path, seed=SEED)
+    runs.store_study_settings(study, stored_settings)
+    with pytest.raises(RuntimeError, match="n_trials: 12 -> 13"):
+        runs.check_study_settings(study_path, changed_settings)
