@@ -284,6 +284,7 @@ def test_check_study_settings_names_a_new_setting(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    "settings",
     [
         {"search.ids": {1, 2}},
         {7: "seven"},
