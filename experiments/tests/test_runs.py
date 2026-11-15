@@ -257,3 +257,42 @@ def test_check_study_settings_names_a_changed_setting(tmp_path: Path) -> None:
     runs.store_study_settings(study, stored_settings)
     with pytest.raises(RuntimeError, match="n_trials: 12 -> 13"):
         runs.check_study_settings(study_path, changed_settings)
+
+
+def test_check_study_settings_names_a_setting_that_is_no_longer_there(
+    tmp_path: Path,
+) -> None:
+    """A stored setting without a current value stops the run too."""
+    study_path = tmp_path / "optuna_study_removed.db"
+    stored_settings = {"n_trials": 12, "model_id": "model-a"}
+    shorter_settings = {"n_trials": 12}
+    study = tuning.open_study(study_path, seed=SEED)
+    runs.store_study_settings(study, stored_settings)
+    with pytest.raises(RuntimeError, match="model_id: model-a -> <missing>"):
+        runs.check_study_settings(study_path, shorter_settings)
+
+
+def test_check_study_settings_names_a_new_setting(tmp_path: Path) -> None:
+    """A current setting the study was not started with stops the run too."""
+    study_path = tmp_path / "optuna_study_added.db"
+    stored_settings = {"n_trials": 12}
+    longer_settings = {"n_trials": 12, "model_id": "model-a"}
+    study = tuning.open_study(study_path, seed=SEED)
+    runs.store_study_settings(study, stored_settings)
+    with pytest.raises(RuntimeError, match="model_id: <missing> -> model-a"):
+        runs.check_study_settings(study_path, longer_settings)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"search.ids": {1, 2}}, {7: "seven"}, {"search.lr": (pd.NA,)}],
+    ids=["a_set", "an_int_key", "a_non_plain_item"],
+)
+def test_check_study_settings_rejects_a_setting_whose_text_is_not_stable(
+    tmp_path: Path,
+    settings: dict,
+) -> None:
+    """A value whose text can change between runs, or a key that is not a str, is refused."""
+    study_path = tmp_path / "optuna_study_unstable.db"
+    with pytest.raises(TypeError):
+        runs.check_study_settings(study_path, settings)
