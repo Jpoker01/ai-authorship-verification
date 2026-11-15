@@ -296,3 +296,43 @@ def test_check_study_settings_rejects_a_setting_whose_text_is_not_stable(
     study_path = tmp_path / "optuna_study_unstable.db"
     with pytest.raises(TypeError):
         runs.check_study_settings(study_path, settings)
+
+def test_check_study_settings_leaves_the_study_file_unchanged(tmp_path: Path) -> None:
+    """The refusal does not touch the file - a trial that was running stays running."""
+    study_path = tmp_path / "optuna_study_untouched.db"
+    stored_settings = {"n_trials": 12}
+    changed_settings = {"n_trials": 13}
+    study = tuning.open_study(study_path, seed=SEED)
+    runs.store_study_settings(study, stored_settings)
+    study.ask()
+    sha256_before = sha256_of(study_path)
+    with pytest.raises(RuntimeError):
+        runs.check_study_settings(study_path, changed_settings)
+    stored_study = optuna.load_study(
+        study_name=study_path.stem, storage=f"sqlite:///{study_path}"
+    )
+    assert sha256_of(study_path) == sha256_before
+    assert [trial.state for trial in stored_study.trials] == [TrialState.RUNNING]
+
+def test_check_study_settings_leaves_an_empty_file_empty(tmp_path: Path) -> None:
+    """A file that a killed start left empty is not filled with tables by the check."""
+    study_path = tmp_path / "optuna_study_zero.db"
+    study_path.touch()
+    settings = {"n_trials": 12}
+    runs.check_study_settings(study_path, settings)
+    assert study_path.stat().st_size == 0
+
+def test_check_study_settings_never_writes_into_the_file(tmp_path: Path) -> None:
+    """A file Optuna would migrate is refused on the read-only connection, not changed."""
+    study_path = tmp_path / "optuna_study_unstamped.db"
+    settings = {"n_trials": 12}
+    study = tuning.open_study(study_path, seed=SEED)
+    runs.store_study_settings(study, settings)
+    connection = sqlite3.connect(study_path)
+    connection.execute("DELETE FROM alembic_version")
+    connection.commit()
+    connection.close()
+    sha256_before = sha256_of(study_path)
+    with pytest.raises(sqlalchemy.exc.OperationalError, match="readonly"):
+        runs.check_study_settings(study_path, settings)
+    assert sha256_of(study_path) == sha256_before
