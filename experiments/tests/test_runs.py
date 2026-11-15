@@ -355,3 +355,46 @@ def test_check_study_settings_passes_for_a_study_without_trials_and_settings(
     settings = {"n_trials": 12}
     tuning.open_study(study_path, seed=SEED)
     runs.check_study_settings(study_path, settings)
+
+def test_check_study_settings_passes_for_a_file_without_the_study(tmp_path: Path) -> None:
+    """A run killed before the study was created in its file can start again."""
+    study_path = tmp_path / "optuna_study_no_study.db"
+    settings = {"n_trials": 12}
+    optuna.storages.RDBStorage(f"sqlite:///{study_path}")
+    runs.check_study_settings(study_path, settings)
+
+def test_store_study_settings_stores_every_value_as_text(tmp_path: Path) -> None:
+    """The settings are stored as text, the form they are compared in."""
+    study_path = tmp_path / "optuna_study_text.db"
+    settings = {"n_trials": 12, "search.lr": (1e-6, 5e-5), "smoke": True}
+    study = tuning.open_study(study_path, seed=SEED)
+    runs.store_study_settings(study, settings)
+    assert study.user_attrs[runs.STUDY_SETTINGS_ATTR] == {
+        "n_trials": "12",
+        "search.lr": "(1e-06, 5e-05)",
+        "smoke": "True",
+    }
+
+def test_store_study_settings_keeps_the_first_settings(tmp_path: Path) -> None:
+    """Settings that are stored once are never replaced."""
+    study_path = tmp_path / "optuna_study_first.db"
+    first_settings = {"n_trials": 12}
+    second_settings = {"n_trials": 13}
+    study = tuning.open_study(study_path, seed=SEED)
+    runs.store_study_settings(study, first_settings)
+    runs.store_study_settings(study, second_settings)
+    assert study.user_attrs[runs.STUDY_SETTINGS_ATTR] == {"n_trials": "12"}
+
+def test_find_finished_run_without_a_folder_is_false(tmp_path: Path) -> None:
+    """Without a result folder the run is not finished."""
+    run_dir = tmp_path / "run_v2"
+    params = {"seed": 42}
+    assert runs.find_finished_run(run_dir, params) is False
+
+def test_find_finished_run_with_the_saved_params_is_true(tmp_path: Path) -> None:
+    """A result folder with the same params marks a finished run."""
+    run_dir = tmp_path / "run_v2"
+    saved_params = {"seed": "42", "final_epochs": "2"}
+    params = {"seed": 42, "final_epochs": 2}
+    write_run_dir(run_dir, saved_params)
+    assert runs.find_finished_run(run_dir, params) is True
