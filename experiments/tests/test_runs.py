@@ -297,6 +297,7 @@ def test_check_study_settings_rejects_a_setting_whose_text_is_not_stable(
     with pytest.raises(TypeError):
         runs.check_study_settings(study_path, settings)
 
+
 def test_check_study_settings_leaves_the_study_file_unchanged(tmp_path: Path) -> None:
     """The refusal does not touch the file - a trial that was running stays running."""
     study_path = tmp_path / "optuna_study_untouched.db"
@@ -309,10 +310,12 @@ def test_check_study_settings_leaves_the_study_file_unchanged(tmp_path: Path) ->
     with pytest.raises(RuntimeError):
         runs.check_study_settings(study_path, changed_settings)
     stored_study = optuna.load_study(
-        study_name=study_path.stem, storage=f"sqlite:///{study_path}"
+        study_name=study_path.stem,
+        storage=f"sqlite:///{study_path}",
     )
     assert sha256_of(study_path) == sha256_before
     assert [trial.state for trial in stored_study.trials] == [TrialState.RUNNING]
+
 
 def test_check_study_settings_leaves_an_empty_file_empty(tmp_path: Path) -> None:
     """A file that a killed start left empty is not filled with tables by the check."""
@@ -321,6 +324,7 @@ def test_check_study_settings_leaves_an_empty_file_empty(tmp_path: Path) -> None
     settings = {"n_trials": 12}
     runs.check_study_settings(study_path, settings)
     assert study_path.stat().st_size == 0
+
 
 def test_check_study_settings_never_writes_into_the_file(tmp_path: Path) -> None:
     """A file Optuna would migrate is refused on the read-only connection, not changed."""
@@ -347,6 +351,7 @@ def test_check_study_settings_rejects_trials_without_settings(tmp_path: Path) ->
     with pytest.raises(RuntimeError, match="holds trials but no settings"):
         runs.check_study_settings(study_path, settings)
 
+
 def test_check_study_settings_passes_for_a_study_without_trials_and_settings(
     tmp_path: Path,
 ) -> None:
@@ -356,12 +361,16 @@ def test_check_study_settings_passes_for_a_study_without_trials_and_settings(
     tuning.open_study(study_path, seed=SEED)
     runs.check_study_settings(study_path, settings)
 
-def test_check_study_settings_passes_for_a_file_without_the_study(tmp_path: Path) -> None:
+
+def test_check_study_settings_passes_for_a_file_without_the_study(
+    tmp_path: Path,
+) -> None:
     """A run killed before the study was created in its file can start again."""
     study_path = tmp_path / "optuna_study_no_study.db"
     settings = {"n_trials": 12}
     optuna.storages.RDBStorage(f"sqlite:///{study_path}")
     runs.check_study_settings(study_path, settings)
+
 
 def test_store_study_settings_stores_every_value_as_text(tmp_path: Path) -> None:
     """The settings are stored as text, the form they are compared in."""
@@ -375,6 +384,7 @@ def test_store_study_settings_stores_every_value_as_text(tmp_path: Path) -> None
         "smoke": "True",
     }
 
+
 def test_store_study_settings_keeps_the_first_settings(tmp_path: Path) -> None:
     """Settings that are stored once are never replaced."""
     study_path = tmp_path / "optuna_study_first.db"
@@ -385,11 +395,13 @@ def test_store_study_settings_keeps_the_first_settings(tmp_path: Path) -> None:
     runs.store_study_settings(study, second_settings)
     assert study.user_attrs[runs.STUDY_SETTINGS_ATTR] == {"n_trials": "12"}
 
+
 def test_find_finished_run_without_a_folder_is_false(tmp_path: Path) -> None:
     """Without a result folder the run is not finished."""
     run_dir = tmp_path / "run_v2"
     params = {"seed": 42}
     assert runs.find_finished_run(run_dir, params) is False
+
 
 def test_find_finished_run_with_the_saved_params_is_true(tmp_path: Path) -> None:
     """A result folder with the same params marks a finished run."""
@@ -398,3 +410,56 @@ def test_find_finished_run_with_the_saved_params_is_true(tmp_path: Path) -> None
     params = {"seed": 42, "final_epochs": 2}
     write_run_dir(run_dir, saved_params)
     assert runs.find_finished_run(run_dir, params) is True
+
+
+def test_find_finished_run_compares_only_the_given_params(tmp_path: Path) -> None:
+    """Before the tuning only a part of the params is known - the rest is not compared."""
+    run_dir = tmp_path / "run_v2"
+    saved_params = {"seed": "42", "final_epochs": "2"}
+    known_params = {"seed": 42}
+    write_run_dir(run_dir, saved_params)
+    assert runs.find_finished_run(run_dir, known_params) is True
+
+
+def test_find_finished_run_with_other_params_raises(tmp_path: Path) -> None:
+    """A result folder of other params stops the run and names the difference."""
+    run_dir = tmp_path / "run_v2"
+    saved_params = {"seed": "42", "final_epochs": "2"}
+    params = {"seed": 42, "final_epochs": 3}
+    write_run_dir(run_dir, saved_params)
+    with pytest.raises(RuntimeError, match="final_epochs: 2 -> 3"):
+        runs.find_finished_run(run_dir, params)
+
+
+def test_find_finished_run_without_a_params_file_raises(tmp_path: Path) -> None:
+    """A folder of the run name without a params file is not a finished run."""
+    run_dir = tmp_path / "run_v2"
+    run_dir.mkdir()
+    params = {"seed": 42}
+    with pytest.raises(RuntimeError, match="is not a finished run folder"):
+        runs.find_finished_run(run_dir, params)
+
+
+def test_remove_unfinished_run_dir_removes_only_the_partial_folder(
+    tmp_path: Path,
+) -> None:
+    """The half-written folder goes; the finished folder and every other folder stay."""
+    run_dir = tmp_path / "run_v2"
+    partial_dir = tmp_path / "run_v2.partial"
+    other_dir = tmp_path / "other_v2"
+    for folder in (run_dir, partial_dir, other_dir):
+        folder.mkdir()
+        (folder / "metrics.json").write_text("{}", encoding="utf-8")
+    runs.remove_unfinished_run_dir(run_dir)
+    assert not partial_dir.exists()
+    assert (run_dir / "metrics.json").is_file()
+    assert (other_dir / "metrics.json").is_file()
+
+
+def test_remove_unfinished_run_dir_without_a_partial_folder_does_nothing(
+    tmp_path: Path,
+) -> None:
+    """A run that was never killed inside a save has nothing to remove."""
+    run_dir = tmp_path / "run_v2"
+    runs.remove_unfinished_run_dir(run_dir)
+    assert list(tmp_path.iterdir()) == []
