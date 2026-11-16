@@ -26,6 +26,7 @@ dependencies = [
     "nltk",
     "networkx",
     "text2graphapi",
+    "en-core-web-sm",
     # plots
     "matplotlib",
     "seaborn",
@@ -74,6 +75,8 @@ exclude-dependencies = [
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130", group = "transformer" }]
+# spaCy models are not on PyPI - pinned to the official GitHub release wheel
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

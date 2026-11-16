@@ -750,6 +750,7 @@ source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "databricks-sdk" },
+    { name = "en-core-web-sm" },
     { name = "ipykernel" },
     { name = "joblib" },
     { name = "matplotlib" },
@@ -795,6 +796,7 @@ transformer = [
 requires-dist = [
     { name = "beautifulsoup4" },
     { name = "databricks-sdk" },
+    { name = "en-core-web-sm", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
     { name = "ipykernel" },
     { name = "joblib" },
     { name = "matplotlib" },
@@ -874,6 +876,14 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e8/ef/6e0e5d7d29b8b91e306fc178a877a4db12d35cab165b4491e550dca1808a/emot-3.1.tar.gz", hash = "sha256:3ded7036aba010c26107d91a5556315bce531dd09cb62db37bb3dc2a07bc2ed2", size = 61400, upload-time = "2021-08-02T03:59:51.154Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/28/b3/3a0f1f66c448fc66aba69a73d6405a104fd973142594ee8bc5a5122e949c/emot-3.1-py3-none-any.whl", hash = "sha256:eebcc10c896bfb1f191aa213929572c93fd26670913b5bfc5dbdcd71a508fe6d", size = 61459, upload-time = "2021-08-02T03:59:49.012Z" },
+]
+
+[[package]]
+name = "en-core-web-sm"
+version = "3.8.0"
+source = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+wheels = [
+    { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl", hash = "sha256:1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85" },
 ]
 
 [[package]]
