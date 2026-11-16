@@ -52,7 +52,7 @@ def _load_models():
 def clean_text(text: str) -> str:
     """
     Clean the text the same way as the training data
-    (experiments/notebooks/dataset/transformer_dataset_preprocessing.ipynb).
+    (experiments/notebooks/dataset/v1/transformer_dataset_preprocessing.ipynb).
     """
     soup = BeautifulSoup(text, "html.parser")
     text = re.sub(r"\[[^]]*\]", "", soup.get_text())

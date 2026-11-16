@@ -97,8 +97,8 @@ markers = ["cerit: needs the transformer group, a GPU, PAN data or downloaded re
 [tool.ruff]
 target-version = "py311"
 src = ["src", "tests"]
-# the v1 notebooks are NOT restyled (minimal changes)
-extend-exclude = ["notebooks"]
+# the v1 notebooks are NOT restyled (minimal changes); the refactored notebooks above them are linted
+extend-exclude = ["notebooks/*/v1"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
