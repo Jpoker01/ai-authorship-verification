@@ -94,3 +94,9 @@ def read_pair_labels(path: Path) -> pd.DataFrame:
             record = json.loads(line)
             rows.append({"id": record["id"], "same": record["same"]})
     return pd.DataFrame(rows, columns=PAIRS_COLUMNS)
+
+def _iter_side_texts(path: Path, side: int) -> Iterator[str]:
+    """Yield text number side (0 or 1) of every pair, one line of the file at a time."""
+    with path.open(encoding="utf-8") as file:
+        for line in file:
+            yield json.loads(line)["pair"][side]
