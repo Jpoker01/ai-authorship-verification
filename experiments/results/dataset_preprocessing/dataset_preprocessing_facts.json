@@ -1,0 +1,28 @@
+{
+  "commit": "a438de3a178fe6cdd00c700fbe4777302c26630b",
+  "started_at": "2026-11-17T14:45:17+00:00",
+  "uv_lock_sha256": "15b6602cdf96a72b393b2587e48ca1d9994ec3dd5174cb8b15492f7e10294c68",
+  "python_version": "3.11.6",
+  "beautifulsoup4_version": "4.15.0",
+  "parser_md5": {
+    "html.parser": "4362c74d58f236f46aed5ee141bcbd2b",
+    "_markupbase": "e82c1e50b3513d40ad77233af215a9e5"
+  },
+  "workers": 8,
+  "counts": {
+    "train": 273065,
+    "validation": 2500,
+    "test": 19999
+  },
+  "raw_sha256": {
+    "pan20-authorship-verification-training-large.jsonl": "11c4f1312986bc0e0b4ad8f92e5912c02d9631dfae4761d4449f72a9571e2425",
+    "pan20-authorship-verification-training-large-truth.jsonl": "b7c4d4f04697471a8abc48cd68aa217aa68897e7398b007b7e6c96334f049448",
+    "pan21-authorship-verification-test.jsonl": "47f2acee237e014e7b361497a8e95cef4fd3030200acb587a295fda251300a1f",
+    "pan21-authorship-verification-test-truth.jsonl": "36229a3e5e36ddee5f1914c59390adb5e9b041835f964d5e56eaa4c10738debc"
+  },
+  "cleaned_sha256": {
+    "pan20-authorship-verification-training-large-cleaned.jsonl": "6a5c1a3d650d089d36313c584955a19ecde676020eb221d7a977745d48144bf2",
+    "pan20-authorship-verification-validation-large-cleaned.jsonl": "05fd9d5225167fddcfd63afd40951a91ca70621517576b402bb7e7ae0c90c113",
+    "pan21-authorship-verification-test-cleaned.jsonl": "6e280234e747646f099f53c6e7e5b034bde808437f827d852974733c33c4d0c2"
+  }
+}
