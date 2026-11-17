@@ -100,3 +100,15 @@ def _iter_side_texts(path: Path, side: int) -> Iterator[str]:
     with path.open(encoding="utf-8") as file:
         for line in file:
             yield json.loads(line)["pair"][side]
+
+
+def iter_pair_texts(path: Path) -> Iterator[str]:
+    """Yield the first text of every pair, then the second text of every pair.
+
+    Args:
+        path: Cleaned jsonl file with the keys id, pair and same.
+
+    Returns:
+        Twice as many texts as pairs, read from the file twice and never held in memory.
+    """
+    return chain(_iter_side_texts(path, 0), _iter_side_texts(path, 1))
