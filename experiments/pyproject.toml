@@ -34,12 +34,12 @@ dependencies = [
     # notebook execution (headless runs survive closing the Jupyter tab)
     "ipykernel",
     "papermill",
-    "scipy-stubs~=1.17.1",
 ]
 
 [dependency-groups]
 dev = [
     "pandas-stubs~=2.3.3",
+    "scipy-stubs~=1.17.1",
     "pytest",
     "ruff"
 ]
