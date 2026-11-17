@@ -78,3 +78,19 @@ class PairFeatures:
     fit_pairs_df: pd.DataFrame
     target_pairs_df: pd.DataFrame
     vectorizer: CountVectorizer | TfidfVectorizer | None
+
+def read_pair_labels(path: Path) -> pd.DataFrame:
+    """Read the id and the label of every pair of a cleaned jsonl file, without its texts.
+
+    Args:
+        path: Cleaned jsonl file with the keys id, pair and same.
+
+    Returns:
+        One row per line, with the columns id and same.
+    """
+    rows = []
+    with path.open(encoding="utf-8") as file:
+        for line in file:
+            record = json.loads(line)
+            rows.append({"id": record["id"], "same": record["same"]})
+    return pd.DataFrame(rows, columns=PAIRS_COLUMNS)
