@@ -59,3 +59,22 @@ class PairMatrices:
     columns: list[str]
     settings: dict[str, object]
     splits: dict[str, SplitMatrices]
+
+@dataclass(frozen=True)
+class PairFeatures:
+    """Features of the fit pairs and of the target pairs.
+
+    Attributes:
+        X_fit: Features of the first and of the second text of every fit pair.
+        X_target: Features of the first and of the second text of every target pair.
+        fit_pairs_df: Id and label of every fit pair.
+        target_pairs_df: Id and label of every target pair.
+        vectorizer: Fitted scikit-learn vectorizer that gives the same features from raw texts,
+            None for features that no vectorizer builds (graph vectors).
+    """
+
+    X_fit: tuple[sp.csr_matrix, sp.csr_matrix]
+    X_target: tuple[sp.csr_matrix, sp.csr_matrix]
+    fit_pairs_df: pd.DataFrame
+    target_pairs_df: pd.DataFrame
+    vectorizer: CountVectorizer | TfidfVectorizer | None
