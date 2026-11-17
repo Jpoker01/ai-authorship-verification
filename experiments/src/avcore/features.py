@@ -272,3 +272,72 @@ def _stack_fit_documents(
     )
     fit_pairs_df = pd.concat([part.pairs_df for part in parts], ignore_index=True)
     return fit_counts, fit_pairs_df
+
+def _bow_matrix(
+    counts: sp.csr_matrix, columns: np.ndarray, binary: bool
+) -> sp.csr_matrix:
+    """Return the kept columns as CountVectorizer returns them (int64, 1 for a present term if binary)."""
+    X = counts[:, columns].astype(np.int64)
+    if binary:
+        X.data.fill(1)
+    return X
+
+def build_bow_features(
+    token_counts: PairMatrices,
+    fit_splits: Sequence[str],
+    target_split: str,
+    *,
+    max_features: int | None,
+    min_df: float,
+    max_df: float,
+    binary: bool,
+) -> PairFeatures:
+    """Build the BoW features of the fit and of the target pairs from the token counts.
+
+    Equal to a CountVectorizer with these arguments fitted on both texts of the fit pairs.
+
+    Args:
+        token_counts: Output of build_token_counts.
+        fit_splits: ["train"] while tuning and for the held-out test scores,
+            ["train", "validation"] for the final model.
+        target_split: "validation" while tuning, "test" for the final model
+            and for the held-out test scores.
+        max_features: Number of most frequent terms to keep, None for all.
+        min_df: Lowest document frequency of a kept term, a share (float) or a count (int).
+        max_df: Highest document frequency of a kept term, a share (float) or a count (int).
+        binary: Whether a term is counted at most once per text.
+
+    Returns:
+        The features of both texts of the fit and of the target pairs.
+
+    Raises:
+        ValueError: If the splits are not the tuning, the final or the held-out
+            combination, max_df is below min_df or no term is kept.
+    """
+    _check_splits(fit_splits, target_split)
+    fit_counts, fit_pairs_df = _stack_fit_documents(token_counts, fit_splits)
+    n_fit_pairs = len(fit_pairs_df)
+    target = token_counts.splits[target_split]
+    if binary:
+        fit_counts.data.fill(1)
+    columns = _select_columns(
+        fit_counts, max_features=max_features, min_df=min_df, max_df=max_df
+    )
+    vectorizer = CountVectorizer(
+        lowercase=token_counts.settings["lowercase"],
+        vocabulary=_vocabulary(token_counts, columns),
+        binary=binary,
+    )
+    return PairFeatures(
+        X_fit=(
+            _bow_matrix(fit_counts[:n_fit_pairs], columns, binary),
+            _bow_matrix(fit_counts[n_fit_pairs:], columns, binary),
+        ),
+        X_target=(
+            _bow_matrix(target.first, columns, binary),
+            _bow_matrix(target.second, columns, binary),
+        ),
+        fit_pairs_df=fit_pairs_df,
+        target_pairs_df=target.pairs_df,
+        vectorizer=vectorizer,
+    )
