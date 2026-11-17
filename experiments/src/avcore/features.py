@@ -134,3 +134,62 @@ def split_sides(pairs_df: pd.DataFrame, vectors: sp.csr_matrix) -> SplitMatrices
         first=vectors[:n_pairs],
         second=vectors[n_pairs:],
     )
+
+def build_token_counts(
+    cleaned_paths: Mapping[str, Path], *, lowercase: bool
+) -> PairMatrices:
+    """Count the words of every text once, streamed from the cleaned jsonl files.
+
+    The columns are all terms of the training and validation texts, so the counts serve
+    a vectorizer fitted on the training texts as well as one fitted on both; a term of
+    the test texts only is never a column.
+
+    Args:
+        cleaned_paths: Cleaned jsonl file of the train, validation and test split.
+        lowercase: Whether the texts are lowercased before they are split into tokens.
+
+    Returns:
+        The token counts of both texts of every pair of the three splits.
+
+    Raises:
+        ValueError: If a split is missing or unknown, or a file has another number of
+            lines when it is read again.
+    """
+    if set(cleaned_paths) != set(SPLITS):
+        raise ValueError(f"The splits have to be {list(SPLITS)}.")
+    labels = {name: read_pair_labels(cleaned_paths[name]) for name in SPLITS}
+
+    vectorizer = CountVectorizer(lowercase=lowercase, dtype=np.int32)
+    fit_texts = chain(
+        iter_pair_texts(cleaned_paths["train"]),
+        iter_pair_texts(cleaned_paths["validation"]),
+    )
+    fit_counts = vectorizer.fit_transform(fit_texts)
+    # fit_transform leaves the entries of a row in the order the terms were first seen
+    fit_counts.sort_indices()
+    test_counts = vectorizer.transform(iter_pair_texts(cleaned_paths["test"]))
+
+    n_train = len(labels["train"])
+    n_validation = len(labels["validation"])
+    if fit_counts.shape[0] != 2 * (n_train + n_validation):
+        raise ValueError(f"{fit_counts.shape[0]} rows for {n_train + n_validation} pairs.")
+    # the sides are sliced straight from fit_counts, so no second copy of a split is made
+    validation_start = 2 * n_train
+    splits = {
+        "train": SplitMatrices(
+            pairs_df=labels["train"],
+            first=fit_counts[:n_train],
+            second=fit_counts[n_train:validation_start],
+        ),
+        "validation": SplitMatrices(
+            pairs_df=labels["validation"],
+            first=fit_counts[validation_start : validation_start + n_validation],
+            second=fit_counts[validation_start + n_validation :],
+        ),
+        "test": split_sides(labels["test"], test_counts),
+    }
+    return PairMatrices(
+        columns=vectorizer.get_feature_names_out().tolist(),
+        settings={"lowercase": lowercase},
+        splits=splits,
+    )
