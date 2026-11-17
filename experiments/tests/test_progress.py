@@ -1,9 +1,11 @@
 """Tests of avcore.progress - CPU only."""
 
+import datetime
 import json
 import logging
 import os
 
+import optuna
 import pytest
 
 from avcore import progress
@@ -152,18 +154,54 @@ def test_a_failed_write_is_logged_once_and_the_run_goes_on(
 def test_a_write_after_failed_writes_is_logged(
     progress_file: progress.ProgressFile, monkeypatch, caplog
 ):
-    """A failure, then a working write - one warning for each, the file holds the last state."""
-    real_replace = os.replace
+    """A failed write, then a working one - a warning for each, the file holds the last state."""
 
     def fail(source, target):
         raise OSError("disk full")
 
     with caplog.at_level(logging.WARNING, logger="avcore.progress"):
+        # the first write fails
         monkeypatch.setattr(progress.os, "replace", fail)
         progress_file.start_stage("tuning")
-        monkeypatch.setattr(progress.os, "replace", real_replace)
+        # the volume works again - the real os.replace is back
+        monkeypatch.undo()
         progress_file.update(force=True, step=2)
-    assert [
-        record.getMessage().endswith("written again.") for record in caplog.records
-    ] == [False, True]
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert len(messages) == 2
+    assert "not written" in messages[0]
+    assert messages[1].endswith("written again.")
     assert read(progress_file)["step"] == 2
+
+def test_a_value_json_can_not_hold_raises(progress_file: progress.ProgressFile):
+    """A wrong field stops the run in its first stage, not silently in the file."""
+    with pytest.raises(TypeError):
+        progress_file.start_stage("tuning", trial=object())
+
+
+def test_trial_fields_count_the_finished_trials_and_their_mean_time():
+    """Two finished trials of 10 s and 30 s give finished_trials 2 and a mean of 20 s; a failed trial is not counted."""
+    study = optuna.create_study()
+    start = datetime.datetime(2026, 11, 17, 12, 0, 0)
+    for seconds, state in [(10, "COMPLETE"), (30, "PRUNED"), (99, "FAIL")]:
+        finished = optuna.trial.create_trial(
+            state=optuna.trial.TrialState[state],
+            value=0.5 if state == "COMPLETE" else None,
+        )
+        finished.datetime_start = start
+        finished.datetime_complete = start + datetime.timedelta(seconds=seconds)
+        study.add_trial(finished)
+    trial = study.ask()
+    fields = progress.trial_fields(trial, n_trials=30)
+    assert fields == {
+        "trial": 3,
+        "finished_trials": 2,
+        "n_trials": 30,
+        "mean_trial_seconds": 20.0,
+    }
+
+
+def test_trial_fields_of_the_first_trial_have_no_mean_time():
+    """Before the first finished trial the mean is None, not a division by zero."""
+    trial = optuna.create_study().ask()
+    assert progress.trial_fields(trial, n_trials=30)["mean_trial_seconds"] is None
