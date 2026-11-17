@@ -13,6 +13,7 @@ dependencies = [
     "scipy",
     "joblib",
     "tqdm",
+    "rich",
     "openpyxl",
     # classifiers and hyperparameter search
     "xgboost",
