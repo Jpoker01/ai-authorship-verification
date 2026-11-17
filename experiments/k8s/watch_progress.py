@@ -209,3 +209,68 @@ def pods_without_progress(pods: dict[str, str] | None, shown: list[dict]) -> lis
         Row("Pods without a progress file yet:"),
         *[Row(f"  {name} {pods[name]}") for name in waiting],
     ]
+
+def build_view(tracker: SpeedTracker, log_dir: Path = LOG_DIR) -> Group:
+    """Read the progress files and the pods once and return the view as a table.
+
+    Args:
+        tracker: Speed of the runs over the refreshes.
+        log_dir: Folder of the progress files.
+
+    Returns:
+        A header and one table row per Row - the text, and a bar where the row has one.
+    """
+    now = time.time()
+    pods = read_pods()
+    shown = read_progress_files(log_dir, now)
+    rows = []
+    for progress in shown:
+        rows += [*describe(progress, pods, tracker, now), Row("")]
+    rows += pods_without_progress(pods, shown)
+    if not rows:
+        rows = [
+            Row(f"No progress file changed in the last {SHOWN_HOURS}h in {log_dir}.")
+        ]
+    table = Table.grid(padding=(0, 2))
+    table.add_column(no_wrap=True)
+    table.add_column(width=BAR_WIDTH)
+    table.add_column(justify="right")
+    for row in rows:
+        if row.total is None:
+            table.add_row(Text(row.text), "", "")
+        else:
+            percent = f"{100 * row.done // row.total}%" if row.total else ""
+            table.add_row(
+                Text(row.text),
+                ProgressBar(row.total, row.done, width=BAR_WIDTH),
+                percent,
+            )
+    header = Text(
+        f"{datetime.now(UTC).astimezone():%H:%M:%S %Z} - Ctrl+C ends this view, never a Job\n"
+    )
+    return Group(header, table)
+
+
+def main() -> None:
+    """Redraw the view every REFRESH_SECONDS until Ctrl+C."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--once", action="store_true", help="print the view once and stop"
+    )
+    args = parser.parse_args()
+    console = Console()
+    tracker = SpeedTracker()
+    if args.once:
+        console.print(build_view(tracker))
+        return
+    try:
+        with Live(build_view(tracker), console=console, auto_refresh=False) as live:
+            while True:
+                time.sleep(REFRESH_SECONDS)
+                live.update(build_view(tracker), refresh=True)
+    except KeyboardInterrupt:
+        console.print("View stopped - the Jobs keep running.")
+
+
+if __name__ == "__main__":
+    main()
