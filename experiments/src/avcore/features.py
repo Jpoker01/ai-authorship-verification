@@ -29,7 +29,7 @@ PAIRS_COLUMNS = ["id", "same"]
 # a vocabulary is fitted on the first splits and applied to the second one
 TUNING_SPLITS = (("train",), "validation")
 FINAL_SPLITS = (("train", "validation"), "test")
-
+HELD_OUT_SPLITS = (("train",), "test")
 
 @dataclass(frozen=True)
 class SplitMatrices:
@@ -193,3 +193,11 @@ def build_token_counts(
         settings={"lowercase": lowercase},
         splits=splits,
     )
+
+def _check_splits(fit_splits: Sequence[str], target_split: str) -> None:
+    """Raise ValueError unless the splits are the tuning, the final or the held-out combination."""
+    combination = (tuple(fit_splits), target_split)
+    if combination not in (TUNING_SPLITS, FINAL_SPLITS, HELD_OUT_SPLITS):
+        raise ValueError(
+            f"fit_splits {list(fit_splits)} with target_split {target_split!r} is not allowed."
+        )
