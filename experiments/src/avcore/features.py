@@ -29,3 +29,17 @@ PAIRS_COLUMNS = ["id", "same"]
 # a vocabulary is fitted on the first splits and applied to the second one
 TUNING_SPLITS = (("train",), "validation")
 FINAL_SPLITS = (("train", "validation"), "test")
+
+@dataclass(frozen=True)
+class SplitMatrices:
+    """Matrices of one split; row i of both matrices belongs to pair i.
+
+    Attributes:
+        pairs_df: Id and label (same) of every pair.
+        first: Vector of the first text of every pair.
+        second: Vector of the second text of every pair.
+    """
+
+    pairs_df: pd.DataFrame
+    first: sp.csr_matrix
+    second: sp.csr_matrix
