@@ -30,6 +30,7 @@ PAIRS_COLUMNS = ["id", "same"]
 TUNING_SPLITS = (("train",), "validation")
 FINAL_SPLITS = (("train", "validation"), "test")
 
+
 @dataclass(frozen=True)
 class SplitMatrices:
     """Matrices of one split; row i of both matrices belongs to pair i.
@@ -43,3 +44,18 @@ class SplitMatrices:
     pairs_df: pd.DataFrame
     first: sp.csr_matrix
     second: sp.csr_matrix
+
+
+@dataclass(frozen=True)
+class PairMatrices:
+    """Vectors of both texts of every pair of the train, validation and test split.
+
+    Attributes:
+        columns: Name of every column (a term).
+        settings: How the vectors were built.
+        splits: Matrices of every split.
+    """
+
+    columns: list[str]
+    settings: dict[str, object]
+    splits: dict[str, SplitMatrices]
