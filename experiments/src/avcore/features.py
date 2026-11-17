@@ -112,3 +112,25 @@ def iter_pair_texts(path: Path) -> Iterator[str]:
         Twice as many texts as pairs, read from the file twice and never held in memory.
     """
     return chain(_iter_side_texts(path, 0), _iter_side_texts(path, 1))
+
+def split_sides(pairs_df: pd.DataFrame, vectors: sp.csr_matrix) -> SplitMatrices:
+    """Split the rows built from iter_pair_texts back into the first and the second texts.
+
+    Args:
+        pairs_df: The pairs the texts came from, with the columns id and same.
+        vectors: One row per text, all first texts, then all second texts.
+
+    Returns:
+        The id and label of every pair with the vectors of its first and second text.
+
+    Raises:
+        ValueError: If there are not exactly two rows per pair.
+    """
+    n_pairs = len(pairs_df)
+    if vectors.shape[0] != 2 * n_pairs:
+        raise ValueError(f"{vectors.shape[0]} rows for {n_pairs} pairs.")
+    return SplitMatrices(
+        pairs_df=pairs_df[PAIRS_COLUMNS],
+        first=vectors[:n_pairs],
+        second=vectors[n_pairs:],
+    )
