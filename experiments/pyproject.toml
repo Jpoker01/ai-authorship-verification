@@ -27,6 +27,7 @@ dependencies = [
     "networkx",
     "text2graphapi",
     "en-core-web-sm",
+    "spacy>=3.8,<3.9",
     # plots
     "matplotlib",
     "seaborn",
