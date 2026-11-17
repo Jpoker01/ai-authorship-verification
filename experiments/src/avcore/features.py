@@ -201,3 +201,74 @@ def _check_splits(fit_splits: Sequence[str], target_split: str) -> None:
         raise ValueError(
             f"fit_splits {list(fit_splits)} with target_split {target_split!r} is not allowed."
         )
+
+def _select_columns(
+    fit_counts: sp.csr_matrix,
+    *,
+    max_features: int | None,
+    min_df: float,
+    max_df: float,
+) -> np.ndarray:
+    """Return the columns a scikit-learn vectorizer keeps when fitted on the fit documents.
+
+    Args:
+        fit_counts: Token counts, one row per fit document (1 for a present term if binary).
+        max_features: Number of most frequent terms to keep, None for all.
+        min_df: Lowest document frequency of a kept term, a share (float) or a count (int).
+        max_df: Highest document frequency of a kept term, a share (float) or a count (int).
+
+    Returns:
+        The kept column numbers, ascending.
+
+    Raises:
+        ValueError: If max_df is below min_df or no term is kept.
+    """
+    n_documents, n_columns = fit_counts.shape
+    document_frequencies = np.bincount(fit_counts.indices, minlength=n_columns)
+    min_count = min_df if isinstance(min_df, Integral) else min_df * n_documents
+    max_count = max_df if isinstance(max_df, Integral) else max_df * n_documents
+    if max_count < min_count:
+        raise ValueError("max_df corresponds to < documents than min_df")
+
+    # a term that is only in other documents is not in the vocabulary of the fit documents
+    kept = (
+        (document_frequencies > 0)
+        & (document_frequencies >= min_count)
+        & (document_frequencies <= max_count)
+    )
+    if max_features is not None and kept.sum() > max_features:
+        # int64 as in scikit-learn on every platform (a sum of int32 counts is int32 on Windows)
+        term_counts = np.asarray(
+            fit_counts.sum(axis=0, dtype=np.int64)).ravel()
+        kept_columns = np.flatnonzero(kept)
+        # the same call on the same values as in scikit-learn, so ties fall the same way
+        order = (-term_counts[kept_columns]).argsort()
+        top_columns = kept_columns[order[:max_features]]
+        kept = np.zeros(n_columns, dtype=bool)
+        kept[top_columns] = True
+
+    columns = np.flatnonzero(kept)
+    if len(columns) == 0:
+        raise ValueError(
+            "After pruning, no terms remain. Try a lower min_df or a higher max_df."
+        )
+    return columns
+
+
+def _vocabulary(token_counts: PairMatrices, columns: np.ndarray) -> dict[str, int]:
+    """Return the kept terms with their feature numbers, as a scikit-learn vocabulary."""
+    return {token_counts.columns[column]: index for index, column in enumerate(columns)}
+
+def _stack_fit_documents(
+    token_counts: PairMatrices, fit_splits: Sequence[str]
+) -> tuple[sp.csr_matrix, pd.DataFrame]:
+    """Return one row per fit document (all first texts, then all second texts) and the fit pairs.
+
+    The rows are stacked once, so a trial holds a single copy of the fit counts.
+    """
+    parts = [token_counts.splits[name] for name in fit_splits]
+    fit_counts = sp.vstack(
+        [part.first for part in parts] + [part.second for part in parts], format="csr"
+    )
+    fit_pairs_df = pd.concat([part.pairs_df for part in parts], ignore_index=True)
+    return fit_counts, fit_pairs_df
