@@ -14,7 +14,7 @@ import pickle
 import struct
 import time
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -456,6 +456,7 @@ def train_classifier(
     validation_df: pd.DataFrame | None = None,
     trial: optuna.Trial | None = None,
     checkpoint_minutes: float = CHECKPOINT_MINUTES,
+    on_step: Callable[..., None] | None = None,
 ) -> TrainingResult:
     """Fine-tune the classifier with AdamW and a linear warmup schedule, resuming a checkpoint.
 
@@ -476,6 +477,9 @@ def train_classifier(
         trial: Optuna trial the pruning F1 is reported to; needs validation_df. The training time
             so far is stored in its user attribute TRAINING_SECONDS_ATTR before every report.
         checkpoint_minutes: Time between two checkpoints inside an epoch.
+        on_step: Called after every step with force (True at the last step of an epoch), epoch,
+            n_epochs, step, n_steps and loss (the running mean of the epoch), e.g.
+            ProgressFile.update; it must not touch the model or a random generator.
 
     Returns:
         The losses, the pruning F1 values, the last validation scores and the training time.
@@ -545,6 +549,16 @@ def train_classifier(
                 scheduler=scheduler,
             )
             progress.step += 1
+            if on_step is not None:
+                # the last step of an epoch is always shown - the validation scoring follows
+                on_step(
+                    force=progress.step == steps_per_epoch,
+                    epoch=progress.epoch + 1,
+                    n_epochs=settings.epochs,
+                    step=progress.step,
+                    n_steps=steps_per_epoch,
+                    loss=progress.epoch_loss / progress.step,
+                )
             if time.monotonic() - last_save >= checkpoint_minutes * 60:
                 save()
         progress.epoch_losses.append(progress.epoch_loss / steps_per_epoch)

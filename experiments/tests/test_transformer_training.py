@@ -1338,3 +1338,29 @@ def test_score_pairs_builds_no_gradients(tokenizer):
     transformer_training.score_pairs(_forward_recording_model(calls), tokenizer, _pairs(2))
     assert [grad_enabled for _, grad_enabled in calls] == [False, False]
 
+def test_train_classifier_calls_on_step_after_every_step_and_trains_the_same(
+    tokenizer, tmp_path
+):
+    """on_step changes no weight and no loss; it gets every step, forced at the last step of an epoch."""
+    model_without, result_without = _train(tokenizer, tmp_path / "a")
+    calls = []
+
+    def record(**fields):
+        calls.append(fields)
+
+    model_with, result_with = _train(tokenizer, tmp_path / "b", on_step=record)
+    assert _same_weights(model_without, model_with)
+    assert result_with.epoch_losses == result_without.epoch_losses
+    # 2 epochs of 3 steps (8 pairs, batch size 3)
+    assert [(call["epoch"], call["step"], call["force"]) for call in calls] == [
+        (1, 1, False),
+        (1, 2, False),
+        (1, 3, True),
+        (2, 1, False),
+        (2, 2, False),
+        (2, 3, True),
+    ]
+    assert {call["n_epochs"] for call in calls} == {2}
+    assert {call["n_steps"] for call in calls} == {3}
+    # the running mean at the last step of an epoch is the epoch's mean loss
+    assert [calls[2]["loss"], calls[5]["loss"]] == pytest.approx(result_with.epoch_losses)
