@@ -452,7 +452,7 @@ def build_tfidf_features(
             transformer.transform(target.second[:, columns]),
         ),
         fit_pairs_df=fit_pairs_df,
-        target_pairs_df=target.pairs_df,
+        target_pairs_df=target.pairs_df.copy(),
         vectorizer=vectorizer,
     )
 
