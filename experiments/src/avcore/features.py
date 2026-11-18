@@ -209,6 +209,17 @@ def _check_splits(fit_splits: Sequence[str], target_split: str) -> None:
             f"fit_splits {list(fit_splits)} with target_split {target_split!r} is not allowed."
         )
 
+def _document_count(document_frequency: float, n_documents: int) -> float:
+    """Return min_df or max_df as a number of documents, the way scikit-learn reads it.
+
+    An int is already a number of documents (min_df=2 - at least 2 texts), a float is a
+    share of all fit documents (min_df=0.05 - at least 5 % of them), so max_df=1.0 means
+    every document but max_df=1 means one document.
+    """
+    if isinstance(document_frequency, Integral):
+        return document_frequency
+    return document_frequency * n_documents
+
 def _select_columns(
     fit_counts: sp.csr_matrix,
     *,
@@ -231,13 +242,12 @@ def _select_columns(
         ValueError: If max_df is below min_df or no term is kept.
     """
     n_documents, n_columns = fit_counts.shape
-    # every stored entry is one term in one document, so this counts the documents per term
+    # every stored entry is one term in one document, so this counts the number of documents per term
     document_frequencies = np.bincount(fit_counts.indices, minlength=n_columns)
     # an int is a number of documents, a float a share of them
-    min_documents = min_df if isinstance(min_df,
-                                         Integral) else min_df * n_documents
-    max_documents = max_df if isinstance(max_df,
-                                         Integral) else max_df * n_documents
+    min_documents = _document_count(min_df, n_documents)
+    max_documents = _document_count(max_df, n_documents)
+
     if max_documents < min_documents:
         raise ValueError("max_df corresponds to < documents than min_df")
 

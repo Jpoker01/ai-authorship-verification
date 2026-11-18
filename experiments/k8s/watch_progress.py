@@ -7,6 +7,7 @@ Ctrl+C or a closed terminal ends ONLY this view, never a Job.
 
 import argparse
 import json
+import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -27,6 +28,15 @@ BAR_WIDTH = 30
 # the fields every progress file has - other files in ~/logs are skipped
 REQUIRED_FIELDS = {"run", "host", "stage", "stage_started_at", "updated_at"}
 
+# styles laid over the finished text of a row - the text itself never changes
+ROW_STYLES = [
+    (re.compile(r"^\S.*"), "bold"),  # a line without indent is a run or a section
+    (re.compile(r"\b(Running|Succeeded)$"), "green"),
+    (re.compile(r"\bPending$"), "yellow"),
+    (re.compile(r"(pod gone|Failed|kubectl not reachable)$"), "red"),
+    (re.compile(r"(?<=in about ).*?(?= \(|$)"), "bold"),  # only the duration
+    (re.compile(r"^  updated .*|\(.*\)"), "dim"),
+]
 
 @dataclass
 class Row:
@@ -236,6 +246,9 @@ def build_view(tracker: SpeedTracker, log_dir: Path = LOG_DIR) -> Group:
     table.add_column(width=BAR_WIDTH)
     table.add_column(justify="right")
     for row in rows:
+        text = Text(row.text)
+        for pattern, style in ROW_STYLES:
+            text.highlight_regex(pattern, style)
         if row.total is None:
             table.add_row(Text(row.text), "", "")
         else:
