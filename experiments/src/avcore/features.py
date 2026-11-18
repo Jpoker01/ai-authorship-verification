@@ -260,12 +260,17 @@ def _select_columns(
         & (document_frequencies <= max_documents)
     )
     if max_features is not None and len(columns) > max_features:
-        # int64 as in scikit-learn on every platform (a sum of int32 counts is int32 on Windows)
+        # total count of every term in the fit documents, int64 as in scikit-learn on every
+        # platform (a sum of int32 counts is int32 on Windows)
         term_counts = np.asarray(
             fit_counts.sum(axis=0, dtype=np.int64)).ravel()
-        # the same call on the same values as in scikit-learn, so ties fall the same way
-        most_frequent_first = (-term_counts[columns]).argsort()
-        columns = np.sort(columns[most_frequent_first[:max_features]])
+        kept_term_counts = term_counts[columns]
+        # positions in columns, highest count first; the same call on the same values as in
+        # scikit-learn, so ties fall the same way
+        ranking = (-kept_term_counts).argsort()
+        top_columns = columns[ranking[:max_features]]
+        # ascending again, so feature i is the i-th kept term in alphabetical order
+        columns = np.sort(top_columns)
 
     if len(columns) == 0:
         raise ValueError(
@@ -275,21 +280,44 @@ def _select_columns(
 
 
 def _vocabulary(token_counts: PairMatrices, columns: np.ndarray) -> dict[str, int]:
-    """Return the kept terms with their feature numbers, as a scikit-learn vocabulary."""
-    return {token_counts.columns[column]: index for index, column in enumerate(columns)}
+    """Return the column of every kept term in the feature matrix, as a scikit-learn vocabulary.
+
+    Column i holds the term of the i-th kept column of the counts, e.g. the columns [2, 4]
+    of the terms ["bird", "cat", "dog", "fish", "run"] give {"dog": 0, "run": 1}.
+    """
+    vocabulary: dict[str, int] = {}
+    for feature, column in enumerate(columns):
+        term = token_counts.columns[column]
+        vocabulary[term] = feature
+    return vocabulary
 
 def _stack_fit_documents(
     token_counts: PairMatrices, fit_splits: Sequence[str]
 ) -> tuple[sp.csr_matrix, pd.DataFrame]:
-    """Return one row per fit document (all first texts, then all second texts) and the fit pairs.
+    """Return the counts of every fit document and the fit pairs they belong to.
 
+    The rows of the counts, for fit_splits ["train", "validation"]:
+
+        train first texts
+        validation first texts
+        train second texts
+        validation second texts
+
+    so row i and row n + i are the two texts of fit pair i (n = number of fit pairs).
     The rows are stacked once, so a trial holds a single copy of the fit counts.
     """
-    parts = [token_counts.splits[name] for name in fit_splits]
-    fit_counts = sp.vstack(
-        [part.first for part in parts] + [part.second for part in parts], format="csr"
-    )
-    fit_pairs_df = pd.concat([part.pairs_df for part in parts], ignore_index=True)
+    first_texts = []
+    second_texts = []
+    pairs_dfs = []
+    for name in fit_splits:
+        split = token_counts.splits[name]
+        first_texts.append(split.first)
+        second_texts.append(split.second)
+        pairs_dfs.append(split.pairs_df)
+
+    # all first texts on top, all second texts below them
+    fit_counts = sp.vstack(first_texts + second_texts, format="csr")
+    fit_pairs_df = pd.concat(pairs_dfs, ignore_index=True)
     return fit_counts, fit_pairs_df
 
 def _bow_matrix(
@@ -470,8 +498,13 @@ def compute_cosine_similarities(
         One similarity per pair; 0 when one of the two vectors has only zeros.
     """
     X_1, X_2 = X_pair
-    similarities = [
-        cosine_similarity(X_1[row : row + 1], X_2[row : row + 1])[0, 0]
-        for row in range(X_1.shape[0])
-    ]
+    n_pairs = X_1.shape[0]
+    similarities = []
+    for row in range(n_pairs):
+        # a slice keeps the row two-dimensional, as cosine_similarity expects
+        first_vector = X_1[row: row + 1]
+        second_vector = X_2[row: row + 1]
+        # one vector against one vector gives a 1 x 1 matrix
+        similarity = cosine_similarity(first_vector, second_vector)[0, 0]
+        similarities.append(similarity)
     return np.array(similarities)
