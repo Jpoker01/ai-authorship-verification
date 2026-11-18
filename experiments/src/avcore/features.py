@@ -231,32 +231,30 @@ def _select_columns(
         ValueError: If max_df is below min_df or no term is kept.
     """
     n_documents, n_columns = fit_counts.shape
+    # every stored entry is one term in one document, so this counts the documents per term
     document_frequencies = np.bincount(fit_counts.indices, minlength=n_columns)
-    min_count = min_df if isinstance(min_df,
-                                     Integral) else min_df * n_documents
-    max_count = max_df if isinstance(max_df,
-                                     Integral) else max_df * n_documents
-    if max_count < min_count:
+    # an int is a number of documents, a float a share of them
+    min_documents = min_df if isinstance(min_df,
+                                         Integral) else min_df * n_documents
+    max_documents = max_df if isinstance(max_df,
+                                         Integral) else max_df * n_documents
+    if max_documents < min_documents:
         raise ValueError("max_df corresponds to < documents than min_df")
 
     # a term that is only in other documents is not in the vocabulary of the fit documents
-    kept = (
-            (document_frequencies > 0)
-            & (document_frequencies >= min_count)
-            & (document_frequencies <= max_count)
+    columns = np.flatnonzero(
+        (document_frequencies > 0)
+        & (document_frequencies >= min_documents)
+        & (document_frequencies <= max_documents)
     )
-    if max_features is not None and kept.sum() > max_features:
+    if max_features is not None and len(columns) > max_features:
         # int64 as in scikit-learn on every platform (a sum of int32 counts is int32 on Windows)
         term_counts = np.asarray(
             fit_counts.sum(axis=0, dtype=np.int64)).ravel()
-        kept_columns = np.flatnonzero(kept)
         # the same call on the same values as in scikit-learn, so ties fall the same way
-        order = (-term_counts[kept_columns]).argsort()
-        top_columns = kept_columns[order[:max_features]]
-        kept = np.zeros(n_columns, dtype=bool)
-        kept[top_columns] = True
+        most_frequent_first = (-term_counts[columns]).argsort()
+        columns = np.sort(columns[most_frequent_first[:max_features]])
 
-    columns = np.flatnonzero(kept)
     if len(columns) == 0:
         raise ValueError(
             "After pruning, no terms remain. Try a lower min_df or a higher max_df."
