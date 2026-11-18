@@ -581,10 +581,14 @@ def test_compute_cosine_similarities_equal_scikit_learn_pair_by_pair(
 
 
 
-def test_build_bow_features_returns_label_frames_of_its_own(
+
+
+def test_editing_the_returned_labels_leaves_the_token_counts_unchanged(
     token_counts: PairMatrices,
 ) -> None:
-    """A column written into the returned label frames never reaches the token counts."""
+    """A trial that edits the labels it got back does not change the labels the next trial gets."""
+    train_labels_before = token_counts.splits["train"].pairs_df.copy()
+    validation_labels_before = token_counts.splits["validation"].pairs_df.copy()
     fit_splits, target_split = TUNING
     max_features = None
     min_df = 1
@@ -600,11 +604,17 @@ def test_build_bow_features_returns_label_frames_of_its_own(
         binary=binary,
     )
 
-    features.fit_pairs_df["score"] = 0.5
+    # what a notebook may do with the labels of one trial
+    first_label = features.fit_pairs_df.loc[0, "same"]
+    features.fit_pairs_df.loc[0, "same"] = not first_label
     features.target_pairs_df["score"] = 0.5
 
-    for name in SPLITS:
-        assert list(token_counts.splits[name].pairs_df.columns) == ["id", "same"]
+    pd.testing.assert_frame_equal(
+        token_counts.splits["train"].pairs_df, train_labels_before
+    )
+    pd.testing.assert_frame_equal(
+        token_counts.splits["validation"].pairs_df, validation_labels_before
+    )
 
 
 def test_compute_cosine_similarities_rejects_sides_of_another_shape() -> None:
