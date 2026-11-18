@@ -38,6 +38,7 @@ ROW_STYLES = [
     (re.compile(r"^  updated .*|\(.*\)"), "dim"),
 ]
 
+
 @dataclass
 class Row:
     """One line of the view; a line with done and total gets a bar."""
@@ -250,11 +251,11 @@ def build_view(tracker: SpeedTracker, log_dir: Path = LOG_DIR) -> Group:
         for pattern, style in ROW_STYLES:
             text.highlight_regex(pattern, style)
         if row.total is None:
-            table.add_row(Text(row.text), "", "")
+            table.add_row(text, "", "")
         else:
             percent = f"{100 * row.done // row.total}%" if row.total else ""
             table.add_row(
-                Text(row.text),
+                text,
                 ProgressBar(row.total, row.done, width=BAR_WIDTH),
                 percent,
             )

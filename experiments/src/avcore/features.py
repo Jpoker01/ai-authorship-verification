@@ -218,6 +218,7 @@ def _document_count(document_frequency: float, n_documents: int) -> float:
     """
     if isinstance(document_frequency, Integral):
         return document_frequency
+
     return document_frequency * n_documents
 
 def _select_columns(
@@ -252,6 +253,7 @@ def _select_columns(
         raise ValueError("max_df corresponds to < documents than min_df")
 
     # a term that is only in other documents is not in the vocabulary of the fit documents
+    # returns only the mask for which these expressions are true
     columns = np.flatnonzero(
         (document_frequencies > 0)
         & (document_frequencies >= min_documents)
