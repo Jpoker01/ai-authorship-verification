@@ -172,3 +172,15 @@ def test_a_kubectl_answer_that_is_not_json_is_shown_as_not_reachable(
     kubectl.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
     assert watch_progress.read_pods() is None
+
+def test_a_new_trial_in_the_same_pod_starts_the_measurement_again():
+    """The next trial of a pod is measured from its own first sample, not from the trial before."""
+    tracker = watch_progress.SpeedTracker()
+    tracker.remaining_seconds(training(50))
+    tracker.remaining_seconds(training(10, updated=60, epoch=3))
+    next_trial = {"trial": 8, "stage_started_at": at(100)}
+    assert tracker.remaining_seconds(training(5, updated=120, epoch=1, **next_trial)) is None
+    # 30 steps in 30 s, step 35 of 300 - 265 steps left
+    assert tracker.remaining_seconds(
+        training(35, updated=150, epoch=1, **next_trial)
+    ) == pytest.approx(265)

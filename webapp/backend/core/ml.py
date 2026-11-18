@@ -4,7 +4,7 @@ import joblib
 import numpy as np
 from bs4 import BeautifulSoup
 
-from .config import MODEL_DIR, VECTORIZER_PATH, CLASSIFIER_PATH
+from .config import CLASSIFIER_PATH, MODEL_DIR, VECTORIZER_PATH
 
 # module variables
 _vectorizer = None

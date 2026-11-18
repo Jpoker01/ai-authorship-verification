@@ -1,6 +1,4 @@
-import pytest
 from fastapi.testclient import TestClient
-from ..core import config
 
 
 def test_predict_success(client: TestClient, mock_predict, sample_texts):

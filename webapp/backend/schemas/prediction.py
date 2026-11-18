@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
 from core import config
+from pydantic import BaseModel, Field
 
 
 class PredictionRequest(BaseModel):
