@@ -577,7 +577,7 @@ def test_compute_cosine_similarities_equal_scikit_learn_pair_by_pair(
 
     assert similarities.tolist() == expected
     assert similarities[1] == 0.0
-    assert similarities[0] == pytest.approx(
+    assert similarities[0] == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize("representation", ["bow", "tfidf"])
