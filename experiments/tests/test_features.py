@@ -7,6 +7,7 @@ import pytest
 import scipy.sparse as sp
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.utils.validation import check_is_fitted
 
 from avcore import features as features_module
 from avcore.data import write_pairs_jsonl
@@ -317,6 +318,7 @@ def test_features_vectorizer_gives_the_same_features_from_raw_texts(
     joblib.dump(features.vectorizer, vectorizer_path)
     vectorizer = joblib.load(vectorizer_path)
 
+    check_is_fitted(vectorizer)
     _assert_same_matrix(vectorizer.transform(_side(target_df, 0)), features.X_target[0])
     _assert_same_matrix(vectorizer.transform(_side(target_df, 1)), features.X_target[1])
 
@@ -576,3 +578,40 @@ def test_compute_cosine_similarities_equal_scikit_learn_pair_by_pair(
     assert similarities.tolist() == expected
     assert similarities[1] == 0.0
     assert similarities[0] == pytest.approx(1.0)
+
+
+
+def test_build_bow_features_returns_label_frames_of_its_own(
+    token_counts: PairMatrices,
+) -> None:
+    """A column written into the returned label frames never reaches the token counts."""
+    fit_splits, target_split = TUNING
+    max_features = None
+    min_df = 1
+    max_df = 1.0
+    binary = False
+    features = build_bow_features(
+        token_counts,
+        fit_splits,
+        target_split,
+        max_features=max_features,
+        min_df=min_df,
+        max_df=max_df,
+        binary=binary,
+    )
+
+    features.fit_pairs_df["score"] = 0.5
+    features.target_pairs_df["score"] = 0.5
+
+    for name in SPLITS:
+        assert list(token_counts.splits[name].pairs_df.columns) == ["id", "same"]
+
+
+def test_compute_cosine_similarities_rejects_sides_of_another_shape() -> None:
+    """Sides with another number of rows raise ValueError instead of scoring only the shorter one."""
+    X_1 = sp.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0]]))
+    X_2 = sp.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]))
+    X_pair = (X_1, X_2)
+
+    with pytest.raises(ValueError, match="shapes"):
+        compute_cosine_similarities(X_pair)

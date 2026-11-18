@@ -253,7 +253,6 @@ def _select_columns(
         raise ValueError("max_df corresponds to < documents than min_df")
 
     # a term that is only in other documents is not in the vocabulary of the fit documents
-    # returns only the mask for which these expressions are true
     columns = np.flatnonzero(
         (document_frequencies > 0)
         & (document_frequencies >= min_documents)
@@ -317,7 +316,8 @@ def _stack_fit_documents(
 
     # all first texts on top, all second texts below them
     fit_counts = sp.vstack(first_texts + second_texts, format="csr")
-    fit_pairs_df = pd.concat(pairs_dfs, ignore_index=True)
+    # a copy of its own, so a column a caller adds never reaches the token counts
+    fit_pairs_df = pd.concat(pairs_dfs, ignore_index=True).copy()
     return fit_counts, fit_pairs_df
 
 def _bow_matrix(
@@ -375,6 +375,9 @@ def build_bow_features(
         vocabulary=_vocabulary(token_counts, columns),
         binary=binary,
     )
+    # with a fixed vocabulary, fit reads no text and only sets vocabulary_, so the
+    # vectorizer counts as fitted like the TF-IDF one
+    vectorizer.fit([])
     return PairFeatures(
         X_fit=(
             _bow_matrix(fit_counts[:n_fit_pairs], columns, binary),
@@ -385,7 +388,7 @@ def build_bow_features(
             _bow_matrix(target.second, columns, binary),
         ),
         fit_pairs_df=fit_pairs_df,
-        target_pairs_df=target.pairs_df,
+        target_pairs_df=target.pairs_df.copy(),
         vectorizer=vectorizer,
     )
 
@@ -494,10 +497,15 @@ def compute_cosine_similarities(
     Args:
         X_pair: Vectors of the first and of the second text of every pair.
 
+    Raises:
+        ValueError: If the two sides do not have the same shape.
+
     Returns:
         One similarity per pair; 0 when one of the two vectors has only zeros.
     """
     X_1, X_2 = X_pair
+    if X_1.shape != X_2.shape:
+        raise ValueError(f"The sides have the shapes {X_1.shape} and {X_2.shape}.")
     n_pairs = X_1.shape[0]
     similarities = []
     for row in range(n_pairs):
