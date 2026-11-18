@@ -158,7 +158,11 @@ def build_token_counts(
     if set(cleaned_paths) != set(SPLITS):
         raise ValueError(f"The splits have to be {list(SPLITS)}.")
     labels = {name: read_pair_labels(cleaned_paths[name]) for name in SPLITS}
+    n_train = len(labels["train"])
+    n_validation = len(labels["validation"])
 
+    # one count of the training and validation texts; its rows are the train first texts,
+    # the train second texts, the validation first texts and the validation second texts
     vectorizer = CountVectorizer(lowercase=lowercase, dtype=np.int32)
     fit_texts = chain(
         iter_pair_texts(cleaned_paths["train"]),
@@ -167,24 +171,27 @@ def build_token_counts(
     fit_counts = vectorizer.fit_transform(fit_texts)
     # fit_transform leaves the entries of a row in the order the terms were first seen
     fit_counts.sort_indices()
+    if fit_counts.shape[0] != 2 * (n_train + n_validation):
+        raise ValueError(
+            f"{fit_counts.shape[0]} rows for {n_train + n_validation} pairs.")
+
+    # the test texts are only counted on these columns, so their own terms are dropped
     test_counts = vectorizer.transform(iter_pair_texts(cleaned_paths["test"]))
 
-    n_train = len(labels["train"])
-    n_validation = len(labels["validation"])
-    if fit_counts.shape[0] != 2 * (n_train + n_validation):
-        raise ValueError(f"{fit_counts.shape[0]} rows for {n_train + n_validation} pairs.")
-    # the sides are sliced straight from fit_counts, so no second copy of a split is made
-    validation_start = 2 * n_train
+    # every side is sliced straight from fit_counts, so no second copy of a split is made
+    train_second_start = n_train
+    validation_first_start = 2 * n_train
+    validation_second_start = 2 * n_train + n_validation
     splits = {
         "train": SplitMatrices(
             pairs_df=labels["train"],
-            first=fit_counts[:n_train],
-            second=fit_counts[n_train:validation_start],
+            first=fit_counts[:train_second_start],
+            second=fit_counts[train_second_start:validation_first_start],
         ),
         "validation": SplitMatrices(
             pairs_df=labels["validation"],
-            first=fit_counts[validation_start : validation_start + n_validation],
-            second=fit_counts[validation_start + n_validation :],
+            first=fit_counts[validation_first_start:validation_second_start],
+            second=fit_counts[validation_second_start:],
         ),
         "test": split_sides(labels["test"], test_counts),
     }
@@ -225,16 +232,18 @@ def _select_columns(
     """
     n_documents, n_columns = fit_counts.shape
     document_frequencies = np.bincount(fit_counts.indices, minlength=n_columns)
-    min_count = min_df if isinstance(min_df, Integral) else min_df * n_documents
-    max_count = max_df if isinstance(max_df, Integral) else max_df * n_documents
+    min_count = min_df if isinstance(min_df,
+                                     Integral) else min_df * n_documents
+    max_count = max_df if isinstance(max_df,
+                                     Integral) else max_df * n_documents
     if max_count < min_count:
         raise ValueError("max_df corresponds to < documents than min_df")
 
     # a term that is only in other documents is not in the vocabulary of the fit documents
     kept = (
-        (document_frequencies > 0)
-        & (document_frequencies >= min_count)
-        & (document_frequencies <= max_count)
+            (document_frequencies > 0)
+            & (document_frequencies >= min_count)
+            & (document_frequencies <= max_count)
     )
     if max_features is not None and kept.sum() > max_features:
         # int64 as in scikit-learn on every platform (a sum of int32 counts is int32 on Windows)
@@ -341,3 +350,118 @@ def build_bow_features(
         target_pairs_df=target.pairs_df,
         vectorizer=vectorizer,
     )
+
+
+
+def build_tfidf_features(
+    token_counts: PairMatrices,
+    fit_splits: Sequence[str],
+    target_split: str,
+    *,
+    max_features: int | None,
+    min_df: float,
+    sublinear_tf: bool,
+) -> PairFeatures:
+    """Build the TF-IDF features of the fit and of the target pairs from the token counts.
+
+    Equal to a TfidfVectorizer with these arguments fitted on both texts of the fit pairs.
+
+    Args:
+        token_counts: Output of build_token_counts.
+        fit_splits: ["train"] while tuning and for the held-out test scores,
+            ["train", "validation"] for the final model.
+        target_split: "validation" while tuning, "test" for the final model
+            and for the held-out test scores.
+        max_features: Number of most frequent terms to keep, None for all.
+        min_df: Lowest document frequency of a kept term, a share (float) or a count (int).
+        sublinear_tf: Whether a count is replaced by 1 + log(count).
+
+    Returns:
+        The features of both texts of the fit and of the target pairs.
+
+    Raises:
+        ValueError: If the splits are not the tuning, the final or the held-out
+            combination or no term is kept.
+    """
+    _check_splits(fit_splits, target_split)
+    fit_counts, fit_pairs_df = _stack_fit_documents(token_counts, fit_splits)
+    n_fit_pairs = len(fit_pairs_df)
+    target = token_counts.splits[target_split]
+    columns = _select_columns(
+        fit_counts, max_features=max_features, min_df=min_df, max_df=1.0
+    )
+    kept_counts = fit_counts[:, columns]
+    # the counts of all columns are not needed any more and can be freed before the weighting
+    del fit_counts
+    transformer = TfidfTransformer(sublinear_tf=sublinear_tf)
+    transformer.fit(kept_counts)
+    vectorizer = TfidfVectorizer(
+        lowercase=token_counts.settings["lowercase"],
+        vocabulary=_vocabulary(token_counts, columns),
+        sublinear_tf=sublinear_tf,
+    )
+    vectorizer.idf_ = transformer.idf_
+    return PairFeatures(
+        X_fit=(
+            transformer.transform(kept_counts[:n_fit_pairs]),
+            transformer.transform(kept_counts[n_fit_pairs:]),
+        ),
+        X_target=(
+            transformer.transform(target.first[:, columns]),
+            transformer.transform(target.second[:, columns]),
+        ),
+        fit_pairs_df=fit_pairs_df,
+        target_pairs_df=target.pairs_df,
+        vectorizer=vectorizer,
+    )
+
+
+
+def compute_absolute_difference_features(
+    X_pair: tuple[sp.csr_matrix, sp.csr_matrix],
+) -> sp.csr_matrix:
+    """Return |first - second| for every pair, one row per pair.
+
+    Args:
+        X_pair: Features of the first and of the second text of every pair.
+
+    Returns:
+        The absolute difference of the two feature vectors of every pair.
+    """
+    X_1, X_2 = X_pair
+    return abs(X_1 - X_2)
+
+
+def compute_element_wise_features(
+    X_pair: tuple[sp.csr_matrix, sp.csr_matrix],
+) -> sp.csr_matrix:
+    """Return first * second, feature by feature, for every pair, one row per pair.
+
+    Args:
+        X_pair: Features of the first and of the second text of every pair.
+
+    Returns:
+        The element-wise product of the two feature vectors of every pair.
+    """
+    X_1, X_2 = X_pair
+    return X_1.multiply(X_2)
+
+
+
+def compute_cosine_similarities(
+    X_pair: tuple[sp.csr_matrix | np.ndarray, sp.csr_matrix | np.ndarray],
+) -> np.ndarray:
+    """Return the cosine similarity of the two texts of every pair.
+
+    Args:
+        X_pair: Vectors of the first and of the second text of every pair.
+
+    Returns:
+        One similarity per pair; 0 when one of the two vectors has only zeros.
+    """
+    X_1, X_2 = X_pair
+    similarities = [
+        cosine_similarity(X_1[row : row + 1], X_2[row : row + 1])[0, 0]
+        for row in range(X_1.shape[0])
+    ]
+    return np.array(similarities)
