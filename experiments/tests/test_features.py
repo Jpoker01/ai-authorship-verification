@@ -580,11 +580,10 @@ def test_compute_cosine_similarities_equal_scikit_learn_pair_by_pair(
     assert similarities[0] == pytest.approx(1.0)
 
 
-
-
-
+@pytest.mark.parametrize("representation", ["bow", "tfidf"])
 def test_editing_the_returned_labels_leaves_the_token_counts_unchanged(
     token_counts: PairMatrices,
+    representation: str,
 ) -> None:
     """A trial that edits the labels it got back does not change the labels the next trial gets."""
     train_labels_before = token_counts.splits["train"].pairs_df.copy()
@@ -594,15 +593,26 @@ def test_editing_the_returned_labels_leaves_the_token_counts_unchanged(
     min_df = 1
     max_df = 1.0
     binary = False
-    features = build_bow_features(
-        token_counts,
-        fit_splits,
-        target_split,
-        max_features=max_features,
-        min_df=min_df,
-        max_df=max_df,
-        binary=binary,
-    )
+    sublinear_tf = False
+    if representation == "bow":
+        features = build_bow_features(
+            token_counts,
+            fit_splits,
+            target_split,
+            max_features=max_features,
+            min_df=min_df,
+            max_df=max_df,
+            binary=binary,
+        )
+    else:
+        features = build_tfidf_features(
+            token_counts,
+            fit_splits,
+            target_split,
+            max_features=max_features,
+            min_df=min_df,
+            sublinear_tf=sublinear_tf,
+        )
 
     # what a notebook may do with the labels of one trial
     first_label = features.fit_pairs_df.loc[0, "same"]
