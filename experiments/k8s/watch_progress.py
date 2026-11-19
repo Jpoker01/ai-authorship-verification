@@ -1,6 +1,6 @@
 """Live view of every running experiment on dt - reads ~/logs/*.progress.json and kubectl.
 
-Run from a terminal on the dt hub server, in ~/diploma_thesis/experiments:
+Run from a terminal on the dt hub server, in the launch checkout ~/launch/<tag>/experiments:
 ".venv/bin/python k8s/watch_progress.py" (launch.sh starts it after the kubectl apply).
 Ctrl+C or a closed terminal ends ONLY this view, never a Job.
 """

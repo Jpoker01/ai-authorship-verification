@@ -92,13 +92,13 @@ spec:
               exec > >(tee -a "$HOME/logs/$run.log") 2>&1
               refuse() { echo "START REFUSED - $1"; exit 64; }
               gpu_check='
-              import torch
+              import os, sys, torch
               print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
               print("cudnn", torch.backends.cudnn.version())
               torch.nn.functional.conv2d(torch.randn(1, 1, 8, 8, device="cuda"), torch.randn(1, 1, 3, 3, device="cuda"))
               libraries = sorted({line.split()[-1] for line in open("/proc/self/maps") if "libcudnn" in line})
               print("libcudnn from", libraries)
-              assert libraries and all("/.venv/" in path for path in libraries), "libcudnn from outside the venv"
+              assert libraries and all(path.startswith(os.path.realpath(sys.prefix) + "/") for path in libraries), "libcudnn from outside this venv"
               '
               expected_data='
               import json, sys
@@ -122,7 +122,8 @@ spec:
               echo "tag=[$(git tag --points-at HEAD | tr '\n' ' ')] describe=[$(git describe --tags --always)]"
               echo "remote=[$(timeout 30 git ls-remote --tags origin 'v2-launch-*' | tr '\t\n' '  ')]"
               echo "lock=$(sha256sum uv.lock | cut -c1-64)"
-              echo "venv=$("$venv/bin/python" -c "$venv_list" | sha256sum | cut -c1-64)"
+              venv_packages="$("$venv/bin/python" -c "$venv_list")" || refuse "the venv python does not run"
+              echo "venv=$(printf '%s\n' "$venv_packages" | sha256sum | cut -c1-64)"
               frozen_bad="$(sha256sum --check --quiet frozen_files.sha256 2>&1)"
               frozen_exit=$?
               echo "frozen=$(grep -c '^[0-9a-f]' frozen_files.sha256) entries, exit=$frozen_exit, list=$(sha256sum frozen_files.sha256 | cut -c1-64) bad=[$frozen_bad]"
