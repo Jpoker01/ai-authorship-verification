@@ -1,0 +1,172 @@
+# Embedding Job of the cosine-similarity notebook for BigBird on CERIT: one RTX PRO 6000 Blackwell,
+# the dt home PVC, the launch checkout with its own venv and kernel. A replaced pod runs the notebook
+# from the top again and the notebook resumes from its saved similarity chunks.
+# Run from a terminal on the dt hub server, in the launch checkout ~/launch/v2-launch-1-transformers:
+#   kubectl apply -f experiments/k8s/embed-bigbird-job.yaml
+#   kubectl get pods -l job-name=embed-bigbird; tail -f ~/logs/embed-bigbird-*.log
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: embed-bigbird
+  labels:
+    app: dt-v2
+    family: transformer
+spec:
+  backoffLimit: 6                 # failed pods before the Job gives up; evictions are not counted (below)
+  podReplacementPolicy: Failed    # a new pod only after the old one has ended - never two on one chunk folder
+  podFailurePolicy:
+    rules:
+      - action: FailJob           # exit 64 = the start checks refused the run, a new pod would refuse it too
+        onExitCodes:
+          containerName: train
+          operator: In
+          values: [64]
+      - action: Ignore            # node drain, eviction, preemption - a new pod, not counted in backoffLimit
+        onPodConditions:
+          - type: DisruptionTarget
+  ttlSecondsAfterFinished: 604800  # the finished Job and its pods stay visible for 7 days
+  template:
+    metadata:
+      labels:
+        app: dt-v2
+        family: transformer
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false  # the training needs no Kubernetes API access
+      nodeSelector:               # ONE GPU type for every chunk - a restart resumes only on the same type
+        nvidia.com/gpu.product: NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition
+      securityContext:            # required by the CERIT Pod Security Admission
+        runAsNonRoot: true
+        runAsUser: 1000           # jovyan:users in the CERIT images, the owner of the home
+        runAsGroup: 100
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: train
+          image: cerit.io/hubs/tensorflowgpu:2.17.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: HOME
+              value: /home/jovyan
+            - name: XDG_CACHE_HOME  # the image sets /home//.cache (outside the PVC)
+              value: /home/jovyan/.cache
+            - name: OMP_NUM_THREADS  # = the CPU request
+              value: "4"
+            - name: RAYON_NUM_THREADS  # = the CPU request; the tokenizer threads ignore OMP_NUM_THREADS
+              value: "4"
+            - name: HF_HUB_OFFLINE  # the hub id is read from the cache on the PVC, never from the network
+              value: "1"
+            - name: REPO          # the launch checkout - its own clone, venv and data; never pulled during the run
+              value: /home/jovyan/launch/v2-launch-1-transformers
+            - name: JUPYTER_PREFER_ENV_PATH  # the python3 kernel of the venv wins over any kernel in ~/.local
+              value: "1"
+            - name: LAUNCH_TAG    # HEAD has to carry this tag; "" in a smoke Job (it runs before the tag)
+              value: v2-launch-1-transformers
+            - name: NOTEBOOK
+              value: transformer_cosine_similarity.ipynb
+            - name: SMOKE         # papermill SMOKE
+              value: "False"
+            - name: N_TRIALS      # MUST stay "" - papermill would inject it although the notebook has no N_TRIALS
+              value: ""
+            - name: SEED          # MUST stay "" - the notebook has no SEED (no randomness)
+              value: ""
+            - name: MODEL_ID      # papermill MODEL_ID - the hub id of this Job (the notebook default is Longformer)
+              value: google/bigbird-roberta-base
+            - name: RUN_TAG       # papermill RUN_TAG - "" is not passed; g1 / g2 in the smoke Jobs
+              value: ""
+            - name: MIN_FREE_GB   # the similarity chunks and the result tables (a few MB) + reserve
+              value: "2"
+            - name: SAMPLE_SECONDS  # period of the memory log (anon, shmem, dirty pages, OOM kills, GPU memory)
+              value: "60"
+          command: ["bash", "-c"]
+          args:
+            - |
+              repo="$REPO"
+              venv="$repo/experiments/.venv"
+              commit="$(git -C "$repo" rev-parse --short HEAD)" || exit 64
+              mkdir -p "$HOME/logs" || exit 64
+              run="$HOSTNAME-$commit"
+              exec > >(tee -a "$HOME/logs/$run.log") 2>&1
+              refuse() { echo "START REFUSED - $1"; exit 64; }
+              gpu_check='
+              import os, sys, torch
+              print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
+              print("cudnn", torch.backends.cudnn.version())
+              torch.nn.functional.conv2d(torch.randn(1, 1, 8, 8, device="cuda"), torch.randn(1, 1, 3, 3, device="cuda"))
+              libraries = sorted({line.split()[-1] for line in open("/proc/self/maps") if "libcudnn" in line})
+              print("libcudnn from", libraries)
+              assert libraries and all(path.startswith(os.path.realpath(sys.prefix) + "/") for path in libraries), "libcudnn from outside this venv"
+              '
+              expected_data='
+              import json, sys
+              for name, sha256 in sorted(json.load(open(sys.argv[1]))["cleaned_sha256"].items()):
+                  print(sha256, name)
+              '
+              venv_list='
+              import importlib.metadata
+              print("\n".join(sorted(f"{d.name.lower()}=={d.version}" for d in importlib.metadata.distributions())))
+              '
+              echo "pod=$HOSTNAME commit=$commit started=$(date -u +%Y-%m-%dT%H:%M:%SZ) repo=[$repo]"
+              nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+              echo "cpu.max=[$(cat /sys/fs/cgroup/cpu.max)] memory.max=[$(cat /sys/fs/cgroup/memory.max)]"
+              export LD_LIBRARY_PATH="$(printf '%s' "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -vx /opt/conda/lib | paste -sd: -)"
+              echo "LD_LIBRARY_PATH=[$LD_LIBRARY_PATH]"
+              echo "params SMOKE=[$SMOKE] N_TRIALS=[$N_TRIALS] SEED=[$SEED] MODEL_ID=[$MODEL_ID] RUN_TAG=[$RUN_TAG] NOTEBOOK=[$NOTEBOOK]"
+              cd "$repo/experiments" || refuse "the repository is missing"
+              status="$(git status --porcelain --untracked-files=all)" || refuse "git status failed"
+              status="$(printf '%s' "$status" | tr '\n' ' ')"
+              echo "status=[$status]"
+              echo "tag=[$(git tag --points-at HEAD | tr '\n' ' ')] describe=[$(git describe --tags --always)]"
+              echo "remote=[$(timeout 30 git ls-remote --tags origin 'v2-launch-*' | tr '\t\n' '  ')]"
+              echo "lock=$(sha256sum uv.lock | cut -c1-64)"
+              venv_packages="$("$venv/bin/python" -c "$venv_list")" || refuse "the venv python does not run"
+              echo "venv=$(printf '%s\n' "$venv_packages" | sha256sum | cut -c1-64)"
+              frozen_bad="$(sha256sum --check --quiet frozen_files.sha256 2>&1)"
+              frozen_exit=$?
+              echo "frozen=$(grep -c '^[0-9a-f]' frozen_files.sha256) entries, exit=$frozen_exit, list=$(sha256sum frozen_files.sha256 | cut -c1-64) bad=[$frozen_bad]"
+              data_expected="$("$venv/bin/python" -c "$expected_data" results/v2/dataset_preprocessing/dataset_preprocessing_facts.json)"
+              data_actual="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && sha256sum "data/processed/$name" | awk -v name="$name" '{print $1, name}'; done)"
+              echo "$data_actual"
+              if [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ]; then echo "data=MATCH"; else echo "data=DIFFERENT"; fi
+              data_missing="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && [ ! -f "data/processed/$name" ] && echo "$name"; done | tr '\n' ' ')"
+              [ -z "$data_missing" ] || refuse "a cleaned data file is missing: $data_missing"
+              [ -z "$status" ] || refuse "the repository has uncommitted or untracked files"
+              [ "$frozen_exit" -eq 0 ] || refuse "a frozen file differs from frozen_files.sha256"
+              if [ -n "$LAUNCH_TAG" ]; then
+                  [ "$(git tag --points-at HEAD --list "$LAUNCH_TAG")" = "$LAUNCH_TAG" ] || refuse "HEAD is not the tag $LAUNCH_TAG"
+              fi
+              free_gb="$(df --output=avail -BG "$HOME" | tail -n 1 | tr -dc '0-9')"
+              echo "free=${free_gb}G needed=${MIN_FREE_GB}G"
+              [ "$free_gb" -ge "$MIN_FREE_GB" ] || refuse "less than ${MIN_FREE_GB}G free on the home volume"
+              kernel_dir="$("$venv/bin/jupyter" kernelspec list | awk '$1 == "python3" {print $2}')"
+              [ "$kernel_dir" = "$venv/share/jupyter/kernels/python3" ] || refuse "the kernel python3 is not the one of the venv: [$kernel_dir]"
+              "$venv/bin/python" -c "$gpu_check" || exit 65
+              cd notebooks/transformer || refuse "the notebook folder is missing"
+              while :; do echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(awk '$1 == "anon" || $1 == "shmem" || $1 == "file_dirty" {printf "%s=%s ", $1, $2}' /sys/fs/cgroup/memory.stat)oom_kill=$(awk '$1 == "oom_kill" {print $2}' /sys/fs/cgroup/memory.events) gpu_mib=$(timeout 10 nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)"; sleep "$SAMPLE_SECONDS"; done >> "$HOME/logs/$run.memory" 2>&1 &
+              echo "papermill started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              exec "$venv/bin/papermill" "$NOTEBOOK" "$HOME/logs/$run.ipynb" -k python3 --cwd . --log-output --no-progress-bar --start-timeout 600 -p SMOKE "$SMOKE" ${N_TRIALS:+-p N_TRIALS "$N_TRIALS"} ${SEED:+-p SEED "$SEED"} ${MODEL_ID:+-r MODEL_ID "$MODEL_ID"} ${RUN_TAG:+-r RUN_TAG "$RUN_TAG"}
+          resources:
+            requests:
+              cpu: "4"
+              memory: 40Gi          # J2 - S8 accepts only if 1,25 x the peak of anon + shmem fits (no checkpoint)
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "4"
+              memory: 40Gi          # = the request (Guaranteed)
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: home
+              mountPath: /home/jovyan
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: xpokor17-home-jupyter-xpokor17--dt  # the home of dt (matched by its pvc-8a8a6cee volume)
+        - name: dshm              # the default /dev/shm is only 64MB; kept from the smoke Job, the training uses no workers
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
