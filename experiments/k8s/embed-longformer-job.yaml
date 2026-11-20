@@ -132,8 +132,8 @@ spec:
               echo "$data_actual"
               if [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ]; then echo "data=MATCH"; else echo "data=DIFFERENT"; fi
               data_missing="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && [ ! -f "data/processed/$name" ] && echo "$name"; done | tr '\n' ' ')"
-                            [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ] || refuse "the cleaned data differs from the facts file"
               [ -z "$data_missing" ] || refuse "a cleaned data file is missing: $data_missing"
+                            [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ] || refuse "the cleaned data differs from the facts file"
               [ -z "$status" ] || refuse "the repository has uncommitted or untracked files"
               [ "$frozen_exit" -eq 0 ] || refuse "a frozen file differs from frozen_files.sha256"
               if [ -n "$LAUNCH_TAG" ]; then
