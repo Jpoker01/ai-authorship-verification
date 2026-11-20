@@ -186,7 +186,11 @@ def load_prompt(path: Path) -> Prompt:
 def _fill(template: str, text1: str, text2: str) -> str:
     """Put the two texts in place of their placeholders; the inserted texts are not searched again."""
     texts = {"{text1}": text1, "{text2}": text2}
-    return _PLACEHOLDER_PATTERN.sub(lambda match: texts[match.group(0)], template)
+
+    def text_of(placeholder: re.Match[str]) -> str:
+        return texts[placeholder.group(0)]
+
+    return _PLACEHOLDER_PATTERN.sub(text_of, template)
 
 
 def truncate_text(tokenizer: Any, text: str, max_tokens: int | None) -> str:
