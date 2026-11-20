@@ -37,9 +37,6 @@ ANSWERED = "answered"
 NO_ANSWER = "no_answer"
 CONFLICTING_ANSWERS = "conflicting_answers"
 
-# the key in double quotes, its value a JSON or Python boolean, quoted or not, followed by
-# the end of the value (",", ".", "}", "]" or the line end) - "True/False" or "true or false"
-# copied from a format text is no answer
 _ANSWER_PATTERN = re.compile(
     r"""
     "answer" \s* : \s*            # the key in double quotes and its colon
@@ -147,3 +144,65 @@ class GenerationEngine(Protocol):
     ) -> list[Any]:
         """Return one request output per prompt, in the order of the prompts."""
         ...
+
+def _sha256_text(text: str) -> str:
+    """Return the sha256 hex digest of a text in UTF-8."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _check_placeholders(templates: Sequence[str]) -> None:
+    """Raise ValueError unless each text placeholder occurs exactly once in all templates."""
+    # a placeholder has no newline, so no match can span two joined templates
+    found = _PLACEHOLDER_PATTERN.findall("\n".join(templates))
+    for placeholder in TEXT_PLACEHOLDERS:
+        if found.count(placeholder) != 1:
+            raise ValueError(
+                f"The prompt has {placeholder} {found.count(placeholder)} times, not once."
+            )
+
+def load_prompt(path: Path) -> Prompt:
+    """Read a prompt file - {"messages": [{"role": ..., "content": ...}, ...]}.
+
+    Args:
+        path: The JSON prompt file.
+
+    Returns:
+        The prompt and the sha256 of the file bytes.
+
+    Raises:
+        ValueError: For an unknown role, or a placeholder that is missing or repeated.
+    """
+    file_bytes = path.read_bytes()
+    messages = json.loads(file_bytes.decode("utf-8"))["messages"]
+    for message in messages:
+        if message.get("role") not in MESSAGE_ROLES:
+            raise ValueError(f"Unknown message role {message.get('role')!r}.")
+    _check_placeholders([message["content"] for message in messages])
+    return Prompt(
+        messages=messages,
+        sha256=hashlib.sha256(file_bytes).hexdigest(),
+    )
+
+def _fill(template: str, text1: str, text2: str) -> str:
+    """Put the two texts in place of their placeholders; the inserted texts are not searched again."""
+    texts = {"{text1}": text1, "{text2}": text2}
+    return _PLACEHOLDER_PATTERN.sub(lambda match: texts[match.group(0)], template)
+
+
+def truncate_text(tokenizer: Any, text: str, max_tokens: int | None) -> str:
+    """Cut a text to its first max_tokens tokens and strip it, so a pair fits a short context.
+
+    Args:
+        tokenizer: Tokenizer of the model.
+        text: One text of a pair.
+        max_tokens: Most tokens kept; None keeps the text unchanged.
+
+    Returns:
+        The decoded first max_tokens tokens without surrounding whitespace, or the text itself.
+    """
+    if max_tokens is None:
+        return text
+    encoding = tokenizer(
+        text, truncation=True, max_length=max_tokens, add_special_tokens=False
+    )
+    return tokenizer.decode(encoding["input_ids"], skip_special_tokens=True).strip()
