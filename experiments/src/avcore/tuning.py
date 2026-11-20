@@ -168,6 +168,8 @@ def run_study(
     if len(finished_trials) >= n_trials:
         return
     _raise_if_too_many_failures(study, n_trials)
+    # a crashed trial skips the callbacks, so a second call in the same kernel needs a fresh sampler
+    _reseed_sampler(study)
 
     # used only to store the correct slot number in optuna database
     def objective_with_position(trial: optuna.Trial) -> float:

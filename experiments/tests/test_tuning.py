@@ -256,3 +256,27 @@ def test_only_caught_errors_count_as_failed_trials(tmp_path: Path) -> None:
 
     run_study(study, objective_failing_then_pruned, n_trials=3, catch=(MemoryError,))
     assert len(_finished(study)) == 3
+
+
+
+def test_run_study_again_on_the_same_study_repeats_the_params(tmp_path: Path) -> None:
+    """After a crash, run_study on the same study object repeats the crashed params, as a new pod does."""
+    uninterrupted = open_study(tmp_path / "uninterrupted_v2.db", pruner=_pruner())
+    run_study(uninterrupted, _objective, n_trials=15)
+    crashed_numbers = []
+
+    def crashing_objective(trial: optuna.Trial) -> float:
+        if trial.number == 5 and not crashed_numbers:
+            crashed_numbers.append(trial.number)
+            trial.suggest_float("x", -10, 10)
+            trial.suggest_int("y", 1, 5)
+            raise RuntimeError("out of memory")
+        return _objective(trial)
+
+    study = open_study(tmp_path / "toy_v2.db", pruner=_pruner())
+    with pytest.raises(RuntimeError, match="out of memory"):
+        run_study(study, crashing_objective, n_trials=15)
+    run_study(study, crashing_objective, n_trials=15)
+    assert study.trials[5].user_attrs["crashed"] is True
+    assert study.trials[6].params == study.trials[5].params
+    assert _finished(study) == _finished(uninterrupted)
