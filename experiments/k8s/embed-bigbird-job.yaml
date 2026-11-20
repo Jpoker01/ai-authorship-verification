@@ -110,7 +110,8 @@ spec:
               print("\n".join(sorted(f"{d.name.lower()}=={d.version}" for d in importlib.metadata.distributions())))
               '
               echo "pod=$HOSTNAME commit=$commit started=$(date -u +%Y-%m-%dT%H:%M:%SZ) repo=[$repo]"
-              timeout 60 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader              echo "cpu.max=[$(cat /sys/fs/cgroup/cpu.max)] memory.max=[$(cat /sys/fs/cgroup/memory.max)]"
+              timeout 60 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader              
+              echo "cpu.max=[$(cat /sys/fs/cgroup/cpu.max)] memory.max=[$(cat /sys/fs/cgroup/memory.max)]"
               export LD_LIBRARY_PATH="$(printf '%s' "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -vx /opt/conda/lib | paste -sd: -)"
               echo "LD_LIBRARY_PATH=[$LD_LIBRARY_PATH]"
               echo "params SMOKE=[$SMOKE] N_TRIALS=[$N_TRIALS] SEED=[$SEED] MODEL_ID=[$MODEL_ID] RUN_TAG=[$RUN_TAG] NOTEBOOK=[$NOTEBOOK]"
