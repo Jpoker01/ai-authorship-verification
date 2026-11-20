@@ -268,3 +268,67 @@ def count_prompt_tokens(builder: PromptBuilder, pairs_df: pd.DataFrame) -> pd.Se
         prompt_ids = builder.build_token_ids(text1, text2)
         counts.append(len(prompt_ids))
     return pd.Series(counts, index=pairs_df["id"].tolist(), name="prompt_tokens")
+
+
+def check_prompt_lengths(prompt_tokens: pd.Series, max_model_len: int) -> None:
+    """Raise before any generation if a prompt leaves no room for one generated token.
+
+    The engine refuses such a prompt and with it the whole chunk it belongs to.
+
+    Args:
+        prompt_tokens: Output of count_prompt_tokens.
+        max_model_len: Context length of the engine.
+
+    Raises:
+        ValueError: If any prompt has max_model_len tokens or more.
+    """
+    too_long = prompt_tokens[prompt_tokens >= max_model_len]
+    if not too_long.empty:
+        raise ValueError(
+            f"{len(too_long)} prompts leave no room for an answer in {max_model_len} tokens, "
+            f"the longest has {too_long.max()} tokens (pair {too_long.idxmax()})."
+        )
+
+def describe_run(
+    engine_settings: Mapping[str, object],
+    builder: PromptBuilder,
+    decoding: DecodingSettings,
+    chunk_size: int,
+    pair_ids: Sequence[str],
+) -> dict[str, object]:
+    """Return everything that decides the generated texts - an answers folder resumes only an equal run.
+
+    Args:
+        engine_settings: The arguments of the engine that change its outputs (model, revision, ...).
+        builder: Builds the prompt of a pair.
+        decoding: Sampling settings of every request.
+        chunk_size: Pairs per engine call.
+        pair_ids: Ids of the pairs, in the order they are generated.
+
+    Returns:
+        A JSON-serializable description of the run.
+    """
+    if builder.chat_template is None:
+        chat_template_sha256 = None
+    else:
+        chat_template_sha256 = _sha256_text(builder.chat_template)
+    return {
+        "engine_settings": dict(engine_settings),
+        "prompt_sha256": builder.prompt.sha256,
+        "chat_template_sha256": chat_template_sha256,
+        "text_token_limit": builder.text_token_limit,
+        "decoding": asdict(decoding),
+        "chunk_size": chunk_size,
+        "n_pairs": len(pair_ids),
+        "pair_ids_sha256": _sha256_text("\n".join(pair_ids)),
+    }
+
+def _write_json_atomically(path: Path, content: object) -> None:
+    """Write a JSON file through a temporary file, so a kill leaves the old file or none."""
+    partial_path = path.with_name(f"{path.name}{PARTIAL_SUFFIX}")
+    with partial_path.open("w", encoding="utf-8") as file:
+        json.dump(content, file, ensure_ascii=False)
+        file.flush()
+        # on the disk before the rename, also when the node crashes
+        os.fsync(file.fileno())
+    os.replace(partial_path, path)
