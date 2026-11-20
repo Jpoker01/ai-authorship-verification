@@ -210,3 +210,61 @@ def truncate_text(tokenizer: Any, text: str, max_tokens: int | None) -> str:
         text, truncation=True, max_length=max_tokens, add_special_tokens=False
     )
     return tokenizer.decode(encoding["input_ids"], skip_special_tokens=True).strip()
+
+@dataclass(frozen=True)
+class PromptBuilder:
+    """Everything that turns the two texts of a pair into the token ids of its prompt.
+
+    Attributes:
+        tokenizer: Tokenizer of the model.
+        prompt: The prompt file.
+        text_token_limit: Most tokens kept of each text, None for the whole texts.
+        chat_template: A chat template that replaces the tokenizer's own, None to use it.
+    """
+
+    tokenizer: Any
+    prompt: Prompt
+    text_token_limit: int | None = None
+    chat_template: str | None = None
+
+    def build_token_ids(self, text1: str, text2: str) -> list[int]:
+        """Return the token ids of the prompt of one pair, with the generation prompt of a chat.
+
+        Args:
+            text1: The first text of the pair.
+            text2: The second text of the pair.
+
+        Returns:
+            The token ids the engine gets, with the special tokens of the chat template.
+        """
+        text1 = truncate_text(self.tokenizer, text1, self.text_token_limit)
+        text2 = truncate_text(self.tokenizer, text2, self.text_token_limit)
+        messages = []
+        for message in self.prompt.messages:
+            content = _fill(message["content"], text1, text2)
+            messages.append({"role": message["role"], "content": content})
+        # tokenize=True encodes without extra special tokens - the template holds them
+        token_ids = self.tokenizer.apply_chat_template(
+            messages,
+            chat_template=self.chat_template,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=False,
+        )
+        return list(token_ids)
+
+def count_prompt_tokens(builder: PromptBuilder, pairs_df: pd.DataFrame) -> pd.Series:
+    """Return the number of prompt tokens of every pair, indexed by the pair id.
+
+    Args:
+        builder: Builds the prompt of a pair.
+        pairs_df: Rows with id and pair (the two texts).
+
+    Returns:
+        The prompt length of every pair, in the order of pairs_df.
+    """
+    counts = []
+    for text1, text2 in pairs_df["pair"]:
+        prompt_ids = builder.build_token_ids(text1, text2)
+        counts.append(len(prompt_ids))
+    return pd.Series(counts, index=pairs_df["id"].tolist(), name="prompt_tokens")
