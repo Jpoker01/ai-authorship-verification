@@ -332,3 +332,95 @@ def _write_json_atomically(path: Path, content: object) -> None:
         # on the disk before the rename, also when the node crashes
         os.fsync(file.fileno())
     os.replace(partial_path, path)
+
+def find_finished_chunks(answers_dir: Path) -> set[int]:
+    """Return the index of every chunk whose file is complete.
+
+    Args:
+        answers_dir: The answers folder of the run.
+
+    Returns:
+        The chunk indexes of the chunk files; a temporary file of a killed write is no chunk.
+    """
+    finished = set()
+    for path in answers_dir.glob("chunk-*.json"):
+        match = CHUNK_FILE_PATTERN.fullmatch(path.name)
+        if match:
+            finished.add(int(match.group(1)))
+    return finished
+
+
+def _chunk_path(answers_dir: Path, index: int) -> Path:
+    """Return the file of one chunk."""
+    return answers_dir / f"chunk-{index:05d}.json"
+
+def prepare_answers_dir(
+    answers_dir: Path, run_description: Mapping[str, object]
+) -> None:
+    """Create the answers folder of a run, or check that an existing one belongs to this run.
+
+    A temporary file a killed write left behind is removed - only after the check passed.
+
+    Args:
+        answers_dir: Folder of the answers of one run, outside the repository.
+        run_description: Output of describe_run.
+
+    Raises:
+        RuntimeError: If the folder belongs to a run with other settings, or holds chunk files
+            without the description of their run; nothing is changed then.
+    """
+    run_path = answers_dir / RUN_FILE
+    # a JSON round trip, so a tuple and a list of the same values compare equal
+    expected = json.loads(json.dumps(run_description))
+    if run_path.is_file():
+        stored = json.loads(run_path.read_text(encoding="utf-8"))
+        changes = []
+        for key in sorted(set(stored) | set(expected)):
+            if stored.get(key) != expected.get(key):
+                changes.append(f"{key}: {stored.get(key)!r} -> {expected.get(key)!r}")
+        if changes:
+            raise RuntimeError(
+                f"{answers_dir} holds the answers of other settings - {'; '.join(changes)}. "
+                "Move it away or restore the settings."
+            )
+    elif find_finished_chunks(answers_dir):
+        raise RuntimeError(
+            f"{answers_dir} holds chunk files but no {RUN_FILE}, so their settings are "
+            "unknown. Move it away."
+        )
+    answers_dir.mkdir(parents=True, exist_ok=True)
+    for partial_path in answers_dir.glob(f"*{PARTIAL_SUFFIX}"):
+        partial_path.unlink()
+    if not run_path.is_file():
+        _write_json_atomically(run_path, expected)
+
+def split_chunks(pair_ids: Sequence[str], chunk_size: int) -> list[list[str]]:
+    """Split the pair ids into consecutive chunks; the last chunk may be shorter.
+
+    Args:
+        pair_ids: Ids of the pairs, in the order they are generated.
+        chunk_size: Pairs per engine call.
+
+    Returns:
+        The ids of every chunk, in pair order.
+
+    Raises:
+        ValueError: If chunk_size is below 1, there are no ids, or an id occurs more than
+            once - a repeated id would give two pairs one prompt.
+    """
+    if chunk_size < 1:
+        raise ValueError(f"chunk_size has to be at least 1, not {chunk_size}.")
+    if not pair_ids:
+        raise ValueError("There are no pair ids to split.")
+    repeated = []
+    for pair_id, count in Counter(pair_ids).items():
+        if count > 1:
+            repeated.append(pair_id)
+    if repeated:
+        raise ValueError(
+            f"{len(repeated)} pair ids occur more than once, e.g. {repeated[0]!r}."
+        )
+    chunks = []
+    for start in range(0, len(pair_ids), chunk_size):
+        chunks.append(list(pair_ids[start : start + chunk_size]))
+    return chunks
