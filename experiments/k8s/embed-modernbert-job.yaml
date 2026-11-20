@@ -142,8 +142,7 @@ spec:
               [ "$free_gb" -ge "$MIN_FREE_GB" ] || refuse "less than ${MIN_FREE_GB}G free on the home volume"
               kernel_dir="$("$venv/bin/jupyter" kernelspec list | awk '$1 == "python3" {print $2}')"
               [ "$kernel_dir" = "$venv/share/jupyter/kernels/python3" ] || refuse "the kernel python3 is not the one of the venv: [$kernel_dir]"
-              "$venv/bin/python" -c "$gpu_check" || exit 65
-              cd notebooks/transformer || refuse "the notebook folder is missing"
+              timeout 1800 "$venv/bin/python" -c "$gpu_check" || exit 65              cd notebooks/transformer || refuse "the notebook folder is missing"
               while :; do echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(awk '$1 == "anon" || $1 == "shmem" || $1 == "file_dirty" {printf "%s=%s ", $1, $2}' /sys/fs/cgroup/memory.stat)oom_kill=$(awk '$1 == "oom_kill" {print $2}' /sys/fs/cgroup/memory.events) gpu_mib=$(timeout 10 nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)"; sleep "$SAMPLE_SECONDS"; done >> "$HOME/logs/$run.memory" 2>&1 &
               echo "papermill started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
               exec "$venv/bin/papermill" "$NOTEBOOK" "$HOME/logs/$run.ipynb" -k python3 --cwd . --log-output --no-progress-bar --start-timeout 600 -p SMOKE "$SMOKE" ${N_TRIALS:+-p N_TRIALS "$N_TRIALS"} ${SEED:+-p SEED "$SEED"} ${MODEL_ID:+-r MODEL_ID "$MODEL_ID"} ${RUN_TAG:+-r RUN_TAG "$RUN_TAG"}
