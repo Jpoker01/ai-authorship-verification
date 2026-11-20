@@ -194,7 +194,8 @@ def _describe_run(
         "model": model.name_or_path,
         # the vocabulary, not the folder it was loaded from (another path in every pod)
         "tokenizer_vocab_sha256": _sha256(
-            json.dumps(tokenizer.get_vocab(), sort_keys=True)),
+            json.dumps(tokenizer.get_vocab(), sort_keys=True)
+        ),
         "truncation_side": tokenizer.truncation_side,
         "padding_side": tokenizer.padding_side,
         "max_length": MAX_LENGTH,
@@ -217,7 +218,8 @@ def _describe_run(
         return json.loads(json.dumps(run, allow_nan=False))
     except (TypeError, ValueError) as error:
         raise ValueError(
-            f"The trial params have to be plain Python values: {error}") from error
+            f"The trial params have to be plain Python values: {error}"
+        ) from error
 
 
 def _save_checkpoint(checkpoint_dir: Path, state: dict) -> None:
@@ -250,30 +252,28 @@ def _load_checkpoint(checkpoint_dir: Path, key: str, run: dict) -> dict | None:
         with zipfile.ZipFile(checkpoint_path):
             pass
         # on the CPU - torch.set_rng_state takes only CPU tensors
-        state = torch.load(checkpoint_path, map_location="cpu",
-                           weights_only=True)
+        state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
         # a damaged pickle can load as another object - no dict, or a dict without these entries
         state_key, state_run = state["key"], state["run"]
         # an OSError (disk, permissions) is not caught - the file may be fine, "delete it" would be wrong
     except (
-            RuntimeError,
-            KeyError,
-            EOFError,
-            AttributeError,
-            ValueError,
-            AssertionError,
-            struct.error,
-            IndexError,
-            TypeError,
-            pickle.UnpicklingError,
-            zipfile.BadZipFile,
+        RuntimeError,
+        KeyError,
+        EOFError,
+        AttributeError,
+        ValueError,
+        AssertionError,
+        struct.error,
+        IndexError,
+        TypeError,
+        pickle.UnpicklingError,
+        zipfile.BadZipFile,
     ) as error:
         raise ValueError(
             f"{checkpoint_path} can not be read - delete it: {error}",
         ) from error
     if state_key != key:
-        logger.info(
-            f"Checkpoint of {state_key} ignored, it is replaced by {key}.")
+        logger.info(f"Checkpoint of {state_key} ignored, it is replaced by {key}.")
         return None
     if state_run != run:
         raise ValueError(
@@ -305,10 +305,8 @@ def _check_inputs(
     """Raise a ValueError for an input that can not be trained on."""
     # torch.save writes a numpy number (also into the optimizer state), but
     # torch.load(weights_only=True) then refuses the whole checkpoint
-    if any(type(value) not in (int, float) for value in
-           asdict(settings).values()):
-        raise ValueError(
-            f"The settings have to be plain Python numbers: {settings}")
+    if any(type(value) not in (int, float) for value in asdict(settings).values()):
+        raise ValueError(f"The settings have to be plain Python numbers: {settings}")
     if train_df.empty:
         raise ValueError("train_df is empty.")
     if settings.epochs < 1 or settings.batch_size < 1:

@@ -27,6 +27,7 @@ def _is_plain(value: object) -> bool:
     """
     return type(value) in _PLAIN_TYPES
 
+
 def _settings_as_text(settings: Mapping[str, object]) -> dict[str, str]:
     """Return the settings as text, the form they are stored and compared in.
 
@@ -49,7 +50,8 @@ def _settings_as_text(settings: Mapping[str, object]) -> dict[str, str]:
             is_stable = _is_plain(value)
         if not is_stable:
             raise TypeError(
-                f"Setting {key} has a value whose text is not stable: {value!r}.")
+                f"Setting {key} has a value whose text is not stable: {value!r}."
+            )
     return {key: str(value) for key, value in settings.items()}
 
 
@@ -87,6 +89,7 @@ def _read_stored_settings(study_path: Path) -> Mapping[str, str] | None:
         )
     return stored_settings
 
+
 def _list_changes(stored: Mapping[str, str], current: Mapping[str, str]) -> list[str]:
     """Return one "key: stored -> current" line per setting that differs.
 
@@ -102,6 +105,7 @@ def _list_changes(stored: Mapping[str, str], current: Mapping[str, str]) -> list
         for key in sorted(set(stored) | set(current))
         if stored.get(key, MISSING) != current.get(key, MISSING)
     ]
+
 
 def check_study_settings(study_path: Path, settings: Mapping[str, object]) -> None:
     """Stop when the study file was started with other settings; the file is only read.
@@ -125,6 +129,7 @@ def check_study_settings(study_path: Path, settings: Mapping[str, object]) -> No
             f"{'; '.join(changes)}. Move the study away or use another run name."
         )
 
+
 def store_study_settings(study: optuna.Study, settings: Mapping[str, object]) -> None:
     """Keep the settings in a study that holds none yet.
 
@@ -138,6 +143,7 @@ def store_study_settings(study: optuna.Study, settings: Mapping[str, object]) ->
     current_settings = _settings_as_text(settings)
     if STUDY_SETTINGS_ATTR not in study.user_attrs:
         study.set_user_attr(STUDY_SETTINGS_ATTR, current_settings)
+
 
 def select_best_trial(study: optuna.Study) -> FrozenTrial:
     """Return the complete trial with the highest value, the earliest one if two are equal.
@@ -155,6 +161,7 @@ def select_best_trial(study: optuna.Study) -> FrozenTrial:
     if not complete_trials:
         raise ValueError(f"Study {study.study_name} holds no complete trial.")
     return max(complete_trials, key=lambda trial: (trial.value, -trial.number))
+
 
 def sum_training_seconds(study: optuna.Study, seconds_attr: str) -> float:
     """Return the training time of the search in seconds.
@@ -177,10 +184,13 @@ def sum_training_seconds(study: optuna.Study, seconds_attr: str) -> float:
         if not trial.user_attrs.get("crashed")
     ]
     if not any(seconds_attr in trial.user_attrs for trial in counted_trials):
-        raise ValueError(f"Study {study.study_name} holds no trial with {seconds_attr}.")
+        raise ValueError(
+            f"Study {study.study_name} holds no trial with {seconds_attr}."
+        )
     return sum(
         (trial.user_attrs.get(seconds_attr, 0.0) for trial in counted_trials), start=0.0
     )
+
 
 def find_finished_run(run_dir: Path, params: Mapping[str, object]) -> bool:
     """Say whether the result folder of the run exists - a finished run is not repeated.
@@ -214,6 +224,7 @@ def find_finished_run(run_dir: Path, params: Mapping[str, object]) -> bool:
         )
     return True
 
+
 def remove_unfinished_run_dir(run_dir: Path) -> None:
     """Remove the half-written result folder that a killed save left behind.
 
@@ -223,6 +234,7 @@ def remove_unfinished_run_dir(run_dir: Path) -> None:
     partial_dir = run_dir.with_name(f"{run_dir.name}.partial")
     if partial_dir.exists():
         shutil.rmtree(partial_dir)
+
 
 def build_predictions(
     pairs_df: pd.DataFrame, scores_df: pd.DataFrame, threshold: float
@@ -246,7 +258,9 @@ def build_predictions(
     if scores_df["id"].tolist() != pairs_df["id"].tolist():
         raise ValueError("The scores do not hold every pair once, in the same order.")
     if scores_df["score"].isna().any():
-        raise ValueError("A score is NaN - it would be predicted as a different author.")
+        raise ValueError(
+            "A score is NaN - it would be predicted as a different author."
+        )
     return pd.DataFrame(
         {
             "id": scores_df["id"],

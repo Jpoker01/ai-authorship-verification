@@ -96,6 +96,7 @@ def read_pods() -> dict[str, str] | None:
         return None
     return {pod["metadata"]["name"]: pod["status"].get("phase", "?") for pod in pods}
 
+
 class SpeedTracker:
     """Steps per second of every run, measured from the progress files this view has seen."""
 
@@ -220,6 +221,7 @@ def pods_without_progress(pods: dict[str, str] | None, shown: list[dict]) -> lis
         Row("Pods without a progress file yet:"),
         *[Row(f"  {name} {pods[name]}") for name in waiting],
     ]
+
 
 def build_view(tracker: SpeedTracker, log_dir: Path = LOG_DIR) -> Group:
     """Read the progress files and the pods once and return the view as a table.

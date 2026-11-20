@@ -25,9 +25,12 @@ def test_tokenizer_loads_as_fast_tokenizer(model_id: str) -> None:
     assert len(encoding["input_ids"][0]) > 0
     assert encoding["input_ids"][0].count(tokenizer.sep_token_id) >= 2
 
+
 def test_bigbird_tokenizer_gives_the_expected_ids() -> None:
     """The BigBird tokenizer converted from spiece.model gives the ids of the pinned environment."""
-    tokenizer = transformers.AutoTokenizer.from_pretrained("google/bigbird-roberta-base")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        "google/bigbird-roberta-base"
+    )
 
     encoding = tokenizer(["first text"], ["second text"])
 

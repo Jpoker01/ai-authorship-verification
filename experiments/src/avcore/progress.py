@@ -51,6 +51,7 @@ def _now() -> str:
     """Return the current UTC time as an ISO 8601 text, to the second."""
     return datetime.now(UTC).isoformat(timespec="seconds")
 
+
 class ProgressFile:
     """Writes the progress of one run into path, at most every min_seconds."""
 

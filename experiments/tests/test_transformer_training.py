@@ -634,15 +634,12 @@ def test_resumed_trial_asks_the_pruner_before_training_on(
         ({"validation_df": _pairs(0)}, "validation_df is empty"),
         # a numpy number read back from a results table - its checkpoint could not be loaded
         (
-                {"settings": dataclasses.replace(SETTINGS,
-                                                 learning_rate=np.float64(
-                                                     1e-3))},
-                "plain Python numbers",
+            {"settings": dataclasses.replace(SETTINGS, learning_rate=np.float64(1e-3))},
+            "plain Python numbers",
         ),
         (
-                {"settings": dataclasses.replace(SETTINGS,
-                                                 batch_size=np.int64(3))},
-                "plain Python numbers",
+            {"settings": dataclasses.replace(SETTINGS, batch_size=np.int64(3))},
+            "plain Python numbers",
         ),
     ],
 )
@@ -658,6 +655,7 @@ def test_train_classifier_rejects_invalid_inputs(
         _train(tokenizer, tmp_path, **changes)
     assert optimizer_steps["done"] == 0
 
+
 @pytest.mark.parametrize("value", [np.int64(3), float("nan")], ids=["numpy_int", "nan"])
 def test_describe_run_rejects_a_trial_param_json_can_not_hold(tokenizer, value):
     """A numpy integer (an unreadable checkpoint) or NaN (never equal to itself) among the trial params raises."""
@@ -671,6 +669,7 @@ def test_describe_run_rejects_a_trial_param_json_can_not_hold(tokenizer, value):
             SETTINGS,
             trial,
         )
+
 
 def test_describe_run_stores_a_numpy_float_trial_param_as_a_float(tokenizer):
     """A numpy float passes json.dumps (it is a float subclass) - it is stored as a plain float, so the checkpoint loads."""
@@ -686,7 +685,9 @@ def test_describe_run_stores_a_numpy_float_trial_param_as_a_float(tokenizer):
     assert type(run["trial_params"]["x"]) is float
 
 
-@pytest.mark.parametrize("change", ["max_length", "truncation_side", "padding_side", "vocabulary"])
+@pytest.mark.parametrize(
+    "change", ["max_length", "truncation_side", "padding_side", "vocabulary"]
+)
 def test_train_classifier_refuses_a_checkpoint_of_another_tokenization(
     tokenizer,
     tmp_path,
@@ -707,6 +708,7 @@ def test_train_classifier_refuses_a_checkpoint_of_another_tokenization(
     with pytest.raises(ValueError, match="other settings or pairs"):
         _train(tokenizer, tmp_path)
 
+
 def test_checkpoints_are_written_every_hour():
     """CHECKPOINT_MINUTES is 60 - the interval the thesis states."""
     assert transformer_training.CHECKPOINT_MINUTES == 60
@@ -714,7 +716,10 @@ def test_checkpoints_are_written_every_hour():
 
 def test_training_settings_use_the_project_seed_by_default():
     """The epoch order is seeded with RANDOM_STATE unless a seed is given."""
-    assert transformer_training.TrainingSettings(1e-3, 0.0, 1, 1, 0.0).seed == RANDOM_STATE
+    assert (
+        transformer_training.TrainingSettings(1e-3, 0.0, 1, 1, 0.0).seed == RANDOM_STATE
+    )
+
 
 def test_checkpoint_key_needs_the_position_of_run_study():
     """A trial started without tuning.run_study has no position - the key would change on a repeat."""
@@ -773,9 +778,15 @@ def test_train_classifier_refuses_a_checkpoint_it_can_not_read(
         # the first byte of the key text - no longer UTF-8, unpickling fails
         (lambda content: content.index(b"final"), 0xFF),
         # "t" (build a tuple) after the storage size becomes "Q" - the storage id is no tuple, AssertionError
-        (lambda content: content.index(struct.pack("<I", 70_000)) + 4, ord("t") ^ ord("Q")),
+        (
+            lambda content: content.index(struct.pack("<I", 70_000)) + 4,
+            ord("t") ^ ord("Q"),
+        ),
         # "Q" (load a storage) becomes "]" - a tuple stands where the storage should be, AttributeError
-        (lambda content: content.index(struct.pack("<I", 70_000)) + 7, ord("Q") ^ ord("]")),
+        (
+            lambda content: content.index(struct.pack("<I", 70_000)) + 7,
+            ord("Q") ^ ord("]"),
+        ),
         # the last "q" (memo with a 1-byte index) becomes "r" (4-byte index) - it reads past the end, struct.error
         (lambda content: content.index(b"q\x11u."), ord("q") ^ ord("r")),
         # the protocol opcode (0x80) becomes an unknown opcode (0x7F) - UnpicklingError
@@ -818,6 +829,7 @@ def test_train_classifier_refuses_a_checkpoint_with_a_damaged_byte(
     ):
         _train(tokenizer, tmp_path)
 
+
 def test_train_classifier_raises_a_read_error_of_the_checkpoint_as_it_is(
     tokenizer,
     tmp_path,
@@ -839,7 +851,9 @@ def test_train_classifier_raises_a_read_error_of_the_checkpoint_as_it_is(
     [["final"], {"key": "final"}],
     ids=["not_a_dict", "no_run"],
 )
-def test_train_classifier_refuses_a_checkpoint_without_its_entries(tokenizer, tmp_path, state):
+def test_train_classifier_refuses_a_checkpoint_without_its_entries(
+    tokenizer, tmp_path, state
+):
     """A readable torch.save file without the key and the run description raises the ValueError naming the file."""
     transformer_training._save_checkpoint(tmp_path, state)
     checkpoint_path = tmp_path / transformer_training.CHECKPOINT_FILE
@@ -848,6 +862,7 @@ def test_train_classifier_refuses_a_checkpoint_without_its_entries(tokenizer, tm
         match=re.escape(f"{checkpoint_path} can not be read"),
     ):
         _train(tokenizer, tmp_path)
+
 
 def test_save_checkpoint_removes_stale_partial_files_before_writing(
     tmp_path,
@@ -1277,11 +1292,14 @@ def test_resumed_bigbird_keeps_the_full_attention_of_the_killed_run(
     )
     assert _same_weights(resumed_model, reference_model)
 
+
 def test_score_pairs_scores_bigbird_in_its_configured_attention(tokenizer):
     """Every pair is scored block-sparse as configured, also after a short pair or a switch by training; the switch is kept."""
     short_pair_df = pd.DataFrame([{"id": "short", "same": True, "pair": ["w1", "w2"]}])
     long_pair_df = _pairs(1, offset=1)  # 15 tokens, block-sparse
-    alone_df = transformer_training.score_pairs(_bigbird_model(), tokenizer, long_pair_df)
+    alone_df = transformer_training.score_pairs(
+        _bigbird_model(), tokenizer, long_pair_df
+    )
     full_model = _bigbird_model()
     full_model.base_model.set_attention_type("original_full")
     with torch.inference_mode():
@@ -1291,7 +1309,9 @@ def test_score_pairs_scores_bigbird_in_its_configured_attention(tokenizer):
     # the two attentions score this pair differently, so a wrong attention is visible
     assert torch.softmax(full_logits, dim=-1)[0, 1].item() != alone_df["score"][0]
     model = _bigbird_model()
-    model.base_model.set_attention_type("original_full")  # as after a batch of short pairs
+    model.base_model.set_attention_type(
+        "original_full"
+    )  # as after a batch of short pairs
     both_df = transformer_training.score_pairs(
         model,
         tokenizer,
@@ -1304,7 +1324,9 @@ def test_score_pairs_scores_bigbird_in_its_configured_attention(tokenizer):
 def test_score_pairs_leaves_the_random_state_unchanged(tokenizer):
     """Switching BigBird back and forth draws from the CPU RNG - after the scoring it is as before."""
     model = _bigbird_model()
-    model.base_model.set_attention_type("original_full")  # scoring switches it to block-sparse and back
+    model.base_model.set_attention_type(
+        "original_full"
+    )  # scoring switches it to block-sparse and back
     rng_state = torch.get_rng_state()
     transformer_training.score_pairs(model, tokenizer, _pairs(1, offset=1))
     assert torch.equal(torch.get_rng_state(), rng_state)
@@ -1328,15 +1350,20 @@ def test_score_pairs_scores_one_pair_at_a_time(tokenizer):
     pairs_df = _pairs(3, offset=1)
     pairs_df.at[1, "pair"] = ["w1 w2", "w3"]  # 6 tokens, the others 15
     calls = []
-    transformer_training.score_pairs(_forward_recording_model(calls), tokenizer, pairs_df)
+    transformer_training.score_pairs(
+        _forward_recording_model(calls), tokenizer, pairs_df
+    )
     assert [shape for shape, _ in calls] == [(1, 15), (1, 6), (1, 15)]
 
 
 def test_score_pairs_builds_no_gradients(tokenizer):
     """Scoring runs without autograd - a kept computation graph of 4 096 tokens would fill the GPU memory."""
     calls = []
-    transformer_training.score_pairs(_forward_recording_model(calls), tokenizer, _pairs(2))
+    transformer_training.score_pairs(
+        _forward_recording_model(calls), tokenizer, _pairs(2)
+    )
     assert [grad_enabled for _, grad_enabled in calls] == [False, False]
+
 
 def test_train_classifier_calls_on_step_after_every_step_and_trains_the_same(
     tokenizer, tmp_path
@@ -1363,4 +1390,6 @@ def test_train_classifier_calls_on_step_after_every_step_and_trains_the_same(
     assert {call["n_epochs"] for call in calls} == {2}
     assert {call["n_steps"] for call in calls} == {3}
     # the running mean at the last step of an epoch is the epoch's mean loss
-    assert [calls[2]["loss"], calls[5]["loss"]] == pytest.approx(result_with.epoch_losses)
+    assert [calls[2]["loss"], calls[5]["loss"]] == pytest.approx(
+        result_with.epoch_losses
+    )

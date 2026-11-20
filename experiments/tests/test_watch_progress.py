@@ -53,6 +53,7 @@ def training(step, updated=0, **fields):
         **fields,
     }
 
+
 RUNNING = {POD: "Running"}
 
 
@@ -112,8 +113,11 @@ def test_the_tuning_estimate_counts_the_running_trial_once():
 
 def test_the_trial_and_the_step_rows_carry_their_bar():
     """The trial row has 5 of 30, the step row 50 of 100; text rows have no bar."""
-    bars = [(row.done, row.total) for row in rows_of(training(50)) if row.total is not None]
+    bars = [
+        (row.done, row.total) for row in rows_of(training(50)) if row.total is not None
+    ]
     assert bars == [(5, 30), (50, 100)]
+
 
 def test_half_written_old_and_foreign_files_are_skipped(tmp_path):
     """Not yet JSON, untouched for over 24h, or without the progress fields - not shown."""
@@ -173,13 +177,17 @@ def test_a_kubectl_answer_that_is_not_json_is_shown_as_not_reachable(
     monkeypatch.setenv("PATH", str(tmp_path))
     assert watch_progress.read_pods() is None
 
+
 def test_a_new_trial_in_the_same_pod_starts_the_measurement_again():
     """The next trial of a pod is measured from its own first sample, not from the trial before."""
     tracker = watch_progress.SpeedTracker()
     tracker.remaining_seconds(training(50))
     tracker.remaining_seconds(training(10, updated=60, epoch=3))
     next_trial = {"trial": 8, "stage_started_at": at(100)}
-    assert tracker.remaining_seconds(training(5, updated=120, epoch=1, **next_trial)) is None
+    assert (
+        tracker.remaining_seconds(training(5, updated=120, epoch=1, **next_trial))
+        is None
+    )
     # 30 steps in 30 s, step 35 of 300 - 265 steps left
     assert tracker.remaining_seconds(
         training(35, updated=150, epoch=1, **next_trial)

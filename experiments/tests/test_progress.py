@@ -87,6 +87,7 @@ def test_start_stage_drops_the_fields_of_the_previous_stage(
     assert "epoch" not in content and "trial" not in content
     assert content["n_pairs"] == 10
 
+
 def test_the_file_is_replaced_and_no_temporary_file_is_left(
     progress_file: progress.ProgressFile, monkeypatch
 ):
@@ -172,6 +173,7 @@ def test_a_write_after_failed_writes_is_logged(
     assert "not written" in messages[0]
     assert messages[1].endswith("written again.")
     assert read(progress_file)["step"] == 2
+
 
 def test_a_value_json_can_not_hold_raises(progress_file: progress.ProgressFile):
     """A wrong field stops the run in its first stage, not silently in the file."""

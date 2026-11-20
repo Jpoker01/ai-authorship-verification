@@ -258,7 +258,6 @@ def test_only_caught_errors_count_as_failed_trials(tmp_path: Path) -> None:
     assert len(_finished(study)) == 3
 
 
-
 def test_run_study_again_on_the_same_study_repeats_the_params(tmp_path: Path) -> None:
     """After a crash, run_study on the same study object repeats the crashed params, as a new pod does."""
     uninterrupted = open_study(tmp_path / "uninterrupted_v2.db", pruner=_pruner())
