@@ -247,3 +247,40 @@ def predict_pairs(
 
     # xgboost returns float32 - float64 keeps its exact value in the prediction table
     return PairPredictions(score=score.astype(np.float64), pred=pred)
+
+
+def build_prediction_table(
+    pairs_df: pd.DataFrame,
+    predictions: PairPredictions,
+) -> pd.DataFrame:
+    """Return id, same, score and pred of every pair, 0 = different author, 1 = same author.
+
+    Args:
+        pairs_df: The pairs that were predicted
+        predictions: Output of predict_pairs for these pairs.
+
+    Returns:
+        One row per pair with the columns tracking.PREDICTION_COLUMNS.
+
+    Raises:
+        ValueError: If an id repeats, there is not one prediction per pair or a score is NaN.
+    """
+    if not pairs_df["id"].is_unique:
+        raise ValueError("The pairs hold a repeated id.")
+    n_pairs = len(pairs_df)
+    if len(predictions.score) != n_pairs or len(predictions.pred) != n_pairs:
+        raise ValueError(
+            f"{len(predictions.score)} scores and {len(predictions.pred)} decisions "
+            f"for {n_pairs} pairs.",
+        )
+    if np.isnan(predictions.score).any():
+        raise ValueError("A score is NaN.")
+    return pd.DataFrame(
+        {
+            "id": pairs_df["id"].to_numpy(),
+            "same": pairs_df["same"].astype(int).to_numpy(),
+            "score": predictions.score,
+            "pred": predictions.pred,
+        },
+        columns=PREDICTION_COLUMNS,
+    )
