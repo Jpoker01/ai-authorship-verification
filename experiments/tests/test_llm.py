@@ -55,6 +55,7 @@ SAMPLING_PARAMS = None
 UNANSWERED_PRED = 0
 UNANSWERED_SCORE = 0.5
 
+
 class FakeTokenizer:
     """Word-level tokenizer with the methods and parameter names of a Hugging Face tokenizer."""
 
@@ -124,6 +125,7 @@ class FakeTokenizer:
             return {"input_ids": token_ids}
         return token_ids
 
+
 def write_prompt_file(folder: Path, content: dict, name: str = "prompt.json") -> Path:
     """Write a prompt file and return its path."""
     path = folder / name
@@ -153,6 +155,7 @@ def make_engine_answers(n_pairs: int) -> dict[str, str]:
         else:
             answers[f"pair-{index}"] = JSON_FALSE
     return answers
+
 
 class FakeEngine:
     """Engine with the generate interface of vllm.LLM - the answer text of a pair comes from its id word."""

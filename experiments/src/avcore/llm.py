@@ -102,6 +102,7 @@ class ParsedAnswer:
     pred: int | None
     status: str
 
+
 @dataclass(frozen=True)
 class GeneratedAnswers:
     """Every answer of a finished generation.
@@ -144,6 +145,7 @@ class GenerationEngine(Protocol):
         """Return one request output per prompt, in the order of the prompts."""
         ...
 
+
 def _sha256_text(text: str) -> str:
     """Return the sha256 hex digest of a text in UTF-8."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -158,6 +160,7 @@ def _check_placeholders(templates: Sequence[str]) -> None:
             raise ValueError(
                 f"The prompt has {placeholder} {found.count(placeholder)} times, not once."
             )
+
 
 def load_prompt(path: Path) -> Prompt:
     """Read a prompt file - {"messages": [{"role": ..., "content": ...}, ...]}.
@@ -181,6 +184,7 @@ def load_prompt(path: Path) -> Prompt:
         messages=messages,
         sha256=hashlib.sha256(file_bytes).hexdigest(),
     )
+
 
 def _fill(template: str, text1: str, text2: str) -> str:
     """Put the two texts in place of their placeholders; the inserted texts are not searched again."""
@@ -209,6 +213,7 @@ def truncate_text(tokenizer: Any, text: str, max_tokens: int | None) -> str:
         text, truncation=True, max_length=max_tokens, add_special_tokens=False
     )
     return tokenizer.decode(encoding["input_ids"], skip_special_tokens=True).strip()
+
 
 @dataclass(frozen=True)
 class PromptBuilder:
@@ -252,6 +257,7 @@ class PromptBuilder:
         )
         return list(token_ids)
 
+
 def count_prompt_tokens(builder: PromptBuilder, pairs_df: pd.DataFrame) -> pd.Series:
     """Return the number of prompt tokens of every pair, indexed by the pair id.
 
@@ -288,6 +294,7 @@ def check_prompt_lengths(prompt_tokens: pd.Series, max_model_len: int) -> None:
             f"the longest has {too_long.max()} tokens (pair {too_long.idxmax()})."
         )
 
+
 def describe_run(
     engine_settings: Mapping[str, object],
     builder: PromptBuilder,
@@ -322,6 +329,7 @@ def describe_run(
         "pair_ids_sha256": _sha256_text("\n".join(pair_ids)),
     }
 
+
 def _write_json_atomically(path: Path, content: object) -> None:
     """Write a JSON file through a temporary file, so a kill leaves the old file or none."""
     partial_path = path.with_name(f"{path.name}{PARTIAL_SUFFIX}")
@@ -331,6 +339,7 @@ def _write_json_atomically(path: Path, content: object) -> None:
         # on the disk before the rename, also when the node crashes
         os.fsync(file.fileno())
     os.replace(partial_path, path)
+
 
 def find_finished_chunks(answers_dir: Path) -> set[int]:
     """Return the index of every chunk whose file is complete.
@@ -352,6 +361,7 @@ def find_finished_chunks(answers_dir: Path) -> set[int]:
 def _chunk_path(answers_dir: Path, index: int) -> Path:
     """Return the file of one chunk."""
     return answers_dir / f"chunk-{index:05d}.json"
+
 
 def prepare_answers_dir(
     answers_dir: Path, run_description: Mapping[str, object]
@@ -393,6 +403,7 @@ def prepare_answers_dir(
     if not run_path.is_file():
         _write_json_atomically(run_path, expected)
 
+
 def split_chunks(pair_ids: Sequence[str], chunk_size: int) -> list[list[str]]:
     """Split the pair ids into consecutive chunks; the last chunk may be shorter.
 
@@ -420,7 +431,6 @@ def split_chunks(pair_ids: Sequence[str], chunk_size: int) -> list[list[str]]:
     for start in range(0, len(pair_ids), chunk_size):
         chunks.append(list(pair_ids[start : start + chunk_size]))
     return chunks
-
 
 
 def _answer_record(
@@ -451,7 +461,6 @@ def _answer_record(
         "finish_reason": completion.finish_reason,
         "text": completion.text,
     }
-
 
 
 def generate_answers(
@@ -516,7 +525,6 @@ def generate_answers(
     return generated
 
 
-
 def parse_answer(text: str) -> ParsedAnswer:
     """Read the answer of a generated text - only the value of its "answer" key counts.
 
@@ -536,7 +544,6 @@ def parse_answer(text: str) -> ParsedAnswer:
         return ParsedAnswer(pred=None, status=CONFLICTING_ANSWERS)
     pred = SAME_AUTHOR if values.pop() == "true" else DIFFERENT_AUTHOR
     return ParsedAnswer(pred=pred, status=ANSWERED)
-
 
 
 def read_answers(

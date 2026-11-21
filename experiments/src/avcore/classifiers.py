@@ -37,3 +37,74 @@ CLASSIFIER_CLASSES: dict[str, type[BaseEstimator]] = {
 }
 
 CLASSIFIER_NAMES = list(CLASSIFIER_CLASSES)
+
+# per param: (kind, *arguments), suggested in this order
+# kinds: categorical (flat choices, storable in study settings), int, float, float_log
+# name -> (kind, *arguments), suggested in this order; kind is categorical, int, float or
+CLASSIFIER_SEARCH_SPACES: dict[str, dict[str, tuple]] = {
+    "multinomial_naive_bayes": {
+        "alpha": ("float_log", 1e-3, 1.0),
+    },
+    "logistic_regression": {
+        "C": ("float_log", 0.01, 10_000.0),
+        "penalty": ("categorical", "l1", "l2"),
+    },
+    "linear_svc": {
+        "C": ("float_log", 0.01, 10_000.0),
+        "loss": ("categorical", "hinge", "squared_hinge"),
+        "class_weight": ("categorical", None, "balanced"),
+    },
+    "k-nearest_neighbors": {
+        "n_neighbors": ("int", 1, 50),
+        "weights": ("categorical", "uniform", "distance"),
+        "metric": ("categorical", "euclidean", "manhattan", "cosine"),
+    },
+    "random_forest": {
+        "n_estimators": ("int", 100, 600),
+        "max_depth": ("int", 5, 50),
+        "min_samples_split": ("int", 2, 20),
+        "min_samples_leaf": ("int", 1, 10),
+    },
+    "xgboost": {
+        "eta": ("float", 0.01, 0.3),
+        "max_depth": ("int", 3, 12),
+        "subsample": ("float", 0.5, 1.0),
+        "colsample_bytree": ("float", 0.5, 1.0),
+        "reg_lambda": ("float_log", 1e-3, 10.0),
+        "reg_alpha": ("float_log", 1e-3, 1.0),
+    },
+}
+
+CLASSIFIER_FIXED_PARAMS: dict[str, dict[str, object]] = {
+    "multinomial_naive_bayes": {},
+    "logistic_regression": {
+        "solver": "liblinear",
+        "max_iter": 5000,
+        "random_state": SEED,
+    },
+    "linear_svc": {
+        "penalty": "l2",
+        "dual": "auto",
+        "max_iter": 5000,
+        "random_state": SEED,
+    },
+    "k-nearest_neighbors": {"algorithm": "auto"},
+    "random_forest": {"random_state": SEED},
+    "xgboost": {
+        "objective": "binary:logistic",
+        "eval_metric": "logloss",
+        "n_estimators": 300,
+        "tree_method": "auto",
+        "random_state": SEED,
+    },
+}
+
+# classifiers that use n_jobs - RF and kNN via joblib, XGBoost its own threads;
+# LogisticRegression uses them only for more than two classes
+THREADED_CLASSIFIERS = [
+    "k-nearest_neighbors",
+    "random_forest",
+    "xgboost",
+]
+# a classifier without probabilities is scored by its decision function
+DECISION_FUNCTION_CLASSIFIERS = ["linear_svc"]
