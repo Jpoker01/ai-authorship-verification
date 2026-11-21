@@ -79,7 +79,7 @@ CLASSIFIER_FIXED_PARAMS: dict[str, dict[str, object]] = {
     "multinomial_naive_bayes": {},
     "logistic_regression": {
         "solver": "liblinear",
-        "max_iter": 5000,
+        "max_iter": 100,
         "random_state": SEED,
     },
     "linear_svc": {
