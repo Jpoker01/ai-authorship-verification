@@ -223,3 +223,77 @@ def test_suggest_params_stays_inside_the_spaces_of_a_real_study() -> None:
                 else:
                     assert arguments[0] <= params[name] <= arguments[1]
             study.tell(trial, 0.0)
+
+
+@pytest.mark.parametrize("classifier_name", CLASSIFIER_NAMES)
+def test_build_classifier_sets_the_searched_and_the_fixed_params(
+    classifier_name: str,
+) -> None:
+    """The classifier gets the searched params, the fixed params and the threads if it takes them."""
+    params = _low_params(classifier_name)
+    n_jobs = 3
+
+    classifier = build_classifier(classifier_name, params, n_jobs=n_jobs)
+
+    set_params = classifier.get_params()
+    actual_params = classifier.get_params()
+    assert isinstance(classifier, classifiers.CLASSIFIER_CLASSES[classifier_name])
+
+    for name, value in params.items():
+        assert actual_params[name] == value
+    for name, value in CLASSIFIER_FIXED_PARAMS[classifier_name].items():
+        assert actual_params[name] == value
+    if classifier_name in classifiers.THREADED_CLASSIFIERS:
+        assert actual_params["n_jobs"] == n_jobs
+    if classifier_name in classifiers.THREADED_CLASSIFIERS:
+        assert set_params["n_jobs"] == n_jobs
+
+
+@pytest.mark.parametrize(
+    "classifier_name",
+    ["logistic_regression", "linear_svc", "random_forest", "xgboost"],
+)
+def test_build_classifier_seeds_every_random_classifier(classifier_name: str) -> None:
+    """LogReg, LinearSVC, RF and XGBoost get random_state=SEED."""
+    params = _low_params(classifier_name)
+    n_jobs = 1
+
+    classifier = build_classifier(classifier_name, params, n_jobs=n_jobs)
+
+    assert classifier.get_params()["random_state"] == SEED
+
+
+def test_build_classifier_rejects_an_unknown_classifier() -> None:
+    """A name that is not in CLASSIFIER_NAMES is refused."""
+    classifier_name = "svm"
+    params: dict[str, object] = {}
+    n_jobs = 1
+
+    with pytest.raises(ValueError, match="Unknown classifier 'svm'"):
+        build_classifier(classifier_name, params, n_jobs=n_jobs)
+
+
+@pytest.mark.parametrize(
+    ("case", "params"),
+    [
+        (
+            "vectorizer param of the best trial",
+            {"C": 1.0, "loss": "hinge", "class_weight": None, "max_features": None},
+        ),
+        ("searched param missing", {"C": 1.0, "loss": "hinge"}),
+        (
+            "fixed param",
+            {"C": 1.0, "loss": "hinge", "class_weight": None, "random_state": 0},
+        ),
+    ],
+)
+def test_build_classifier_takes_exactly_the_searched_params(
+    case: str,
+    params: dict[str, object],
+) -> None:
+    """Any other set of params is refused - an extra one, a missing one or a fixed one."""
+    classifier_name = "linear_svc"
+    n_jobs = 1
+
+    with pytest.raises(ValueError, match="linear_svc takes the params"):
+        build_classifier(classifier_name, params, n_jobs=n_jobs)
