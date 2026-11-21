@@ -205,7 +205,7 @@ class PairPredictions:
 def predict_pairs(
     classifier: BaseEstimator,
     classifier_name: str,
-    X: sp.csr_matrix,
+    pair_features: sp.csr_matrix,
 ) -> PairPredictions:
     """Return the decision and the score of a fitted classifier for every pair.
 
@@ -213,7 +213,7 @@ def predict_pairs(
         classifier: The fitted classifier or pipeline of build_classifier, fitted on the
             labels 0 / 1 or False / True.
         classifier_name: Its name, one of CLASSIFIER_NAMES.
-        X: One row per pair.
+        pair_features: One row per pair.
 
     Returns:
         The 0 / 1 decision of classifier.predict and the score of every pair.
@@ -238,12 +238,12 @@ def predict_pairs(
 
     with prediction_settings:
         # predict returns bool for bool labels; 0 = different author, 1 = same author
-        pred = classifier.predict(X).astype(int)
+        pred = classifier.predict(pair_features).astype(int)
         if classifier_name in DECISION_FUNCTION_CLASSIFIERS:
-            score = classifier.decision_function(X)
+            score = classifier.decision_function(pair_features)
         else:
             same_author_column = 1  # the columns follow classes_, checked to be [0, 1]
-            score = classifier.predict_proba(X)[:, same_author_column]
+            score = classifier.predict_proba(pair_features)[:, same_author_column]
 
     # xgboost returns float32 - float64 keeps its exact value in the prediction table
     return PairPredictions(score=score.astype(np.float64), pred=pred)
