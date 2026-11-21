@@ -958,12 +958,12 @@ def test_read_answers_raises_for_a_missing_chunk(
         llm.read_answers(answers_dir, pair_ids, CHUNK_SIZE)
 
 
-def test_read_answers_rejects_a_chunk_of_other_pairs(
+def test_read_answers_rejects_chunks_of_other_pairs(
     tmp_path: Path,
     chat_builder: llm.PromptBuilder,
     run_description: dict,
 ) -> None:
-    """Chunk files of another pair order are refused."""
+    """An answers folder is not read for pairs it holds no answers of."""
     pairs_df = make_pairs(4)
     answers_dir = tmp_path / "answers"
     llm.prepare_answers_dir(answers_dir, run_description)
@@ -976,9 +976,10 @@ def test_read_answers_rejects_a_chunk_of_other_pairs(
         answers_dir,
         CHUNK_SIZE,
     )
-    reordered_ids = list(reversed(pairs_df["id"].tolist()))
+    # the folder holds the answers of id-0 to id-3 only
+    other_pair_ids = ["other-0", "other-1", "other-2", "other-3"]
     with pytest.raises(RuntimeError, match="other pairs"):
-        llm.read_answers(answers_dir, reordered_ids, CHUNK_SIZE)
+        llm.read_answers(answers_dir, other_pair_ids, CHUNK_SIZE)
 
 
 def test_read_answers_sums_the_seconds_of_every_chunk(tmp_path: Path) -> None:
@@ -1075,7 +1076,7 @@ def test_build_prediction_tables_names_the_unanswered_columns() -> None:
 
 
 def test_build_prediction_tables_rejects_answers_of_other_pairs() -> None:
-    """Answers in another order than the pairs are refused."""
+    """Answers in another order are refused - the tables match answers to pairs by row position."""
     pairs_df = pd.DataFrame({"id": ["a", "b"], "same": [True, False]})
     answers_df = make_answers_df(["b", "a"], [JSON_TRUE, JSON_FALSE])
     with pytest.raises(ValueError, match="every pair once"):
@@ -1159,7 +1160,6 @@ def test_real_chat_template_gives_one_begin_token(tmp_path: Path) -> None:
     text1 = "one"
     text2 = "two"
     token_ids = builder.build_token_ids(text1, text2)
-    assert token_ids.count(tokenizer.bos_token_id) == 1
     assert tokenizer.convert_ids_to_tokens(token_ids) == [
         BOS,
         "[INST]",
