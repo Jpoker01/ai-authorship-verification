@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "\nRespond with a JSON object including two key elements:\n{\n  \"analysis\": Reasoning behind your answer.,\n  \"answer\":  A boolean (True/False) answer.\n}\n"
+    },
+    {
+      "role": "user",
+      "content": "\nVerify if the input texts were written by the same author.\nDo not consider topic differences. Focus on grammatical styles. \nAnalyze the writing styles of the input texts, disregarding the differences in topic and content. \nFocus on linguistic features such as phrasal verbs, modal verbs, punctuation, rare words, affixes, quantities, \nhumor, sarcasm, typographical errors, and misspellings. \n \n        The input texts (Text 1 and Text 2) are delimited with triple backticks. ```Text 1: {text1}, \n\nText 2: {text2}```\n\n"
+    }
+  ]
+}
