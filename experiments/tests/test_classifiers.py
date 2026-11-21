@@ -163,3 +163,63 @@ def test_linear_classifiers_search_c_up_to_1e3() -> None:
 
     assert CLASSIFIER_SEARCH_SPACES["logistic_regression"] == expected_logreg
     assert CLASSIFIER_SEARCH_SPACES["linear_svc"] == expected_svc
+
+
+def test_search_spaces_are_accepted_as_study_settings(tmp_path: Path) -> None:
+    """Every search space can be stored as a study setting (no nested list)."""
+    study_path = tmp_path / "study.db"
+    settings = {}
+    for classifier_name, search_space in CLASSIFIER_SEARCH_SPACES.items():
+        for name, space in search_space.items():
+            settings[f"search.{classifier_name}.{name}"] = space
+
+    runs.check_study_settings(study_path, settings)
+
+
+def test_suggest_params_suggests_every_kind_in_the_order_of_the_space() -> None:
+    """A categorical gets its flat choices as a list, float_log a log-scaled float."""
+    trial = RecordingTrial()
+    search_space = {
+        "C": ("float_log", 0.01, 5.0),
+        "class_weight": ("categorical", None, "balanced"),
+        "n_neighbors": ("int", 1, 50),
+        "eta": ("float", 0.01, 0.3),
+    }
+    expected_calls = [
+        ("C", FloatDistribution(0.01, 5.0, log=True)),
+        ("class_weight", CategoricalDistribution([None, "balanced"])),
+        ("n_neighbors", IntDistribution(1, 50)),
+        ("eta", FloatDistribution(0.01, 0.3)),
+    ]
+
+    params = suggest_params(trial, search_space)
+
+    assert trial.calls == expected_calls
+    assert params == {"C": 0.01, "class_weight": None, "n_neighbors": 1, "eta": 0.01}
+
+
+def test_suggest_params_rejects_an_unknown_kind() -> None:
+    """A space whose kind is not categorical, int, float or float_log stops the trial."""
+    trial = RecordingTrial()
+    search_space = {"alpha": ("normal", 0.0, 1.0)}
+
+    with pytest.raises(ValueError, match="Unknown kind 'normal' of alpha"):
+        suggest_params(trial, search_space)
+
+
+def test_suggest_params_stays_inside_the_spaces_of_a_real_study() -> None:
+    """Twenty seeded TPE trials of every classifier suggest values inside its space."""
+    sampler = optuna.samplers.TPESampler(seed=SEED)
+    study = optuna.create_study(direction="maximize", sampler=sampler)
+    n_trials = 20
+
+    for search_space in CLASSIFIER_SEARCH_SPACES.values():
+        for _ in range(n_trials):
+            trial = study.ask()
+            params = suggest_params(trial, search_space)
+            for name, (kind, *arguments) in search_space.items():
+                if kind == "categorical":
+                    assert params[name] in arguments
+                else:
+                    assert arguments[0] <= params[name] <= arguments[1]
+            study.tell(trial, 0.0)
