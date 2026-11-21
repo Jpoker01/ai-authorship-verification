@@ -234,11 +234,11 @@ def run_description(chat_builder: llm.PromptBuilder) -> dict:
     decoding = llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=50)
     engine_settings = {"model": "fake"}
     return llm.describe_run(
-        engine_settings,
-        chat_builder,
-        decoding,
-        CHUNK_SIZE,
-        pair_ids,
+        engine_settings=engine_settings,
+        builder=chat_builder,
+        decoding=decoding,
+        chunk_size=CHUNK_SIZE,
+        pair_ids=pair_ids,
     )
 
 
@@ -465,47 +465,54 @@ def test_describe_run_changes_with_each_setting(
 ) -> None:
     """Every setting that can change a generated text changes the description."""
     tokenizer = FakeTokenizer()
-    prompt = llm.load_prompt(write_prompt_file(tmp_path, CHAT_PROMPT))
-    user_only = {"messages": [CHAT_PROMPT["messages"][1]]}
-    other_prompt = llm.load_prompt(write_prompt_file(tmp_path, user_only, "other.json"))
-    settings = {
-        "engine_settings": {"model": "fake"},
-        "builder": llm.PromptBuilder(tokenizer=tokenizer, prompt=prompt),
-        "decoding": llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=50),
-        "chunk_size": 2,
-        "pair_ids": ["a", "b", "c"],
-    }
-    changes = {
-        "engine": {"engine_settings": {"model": "fake", "revision": "abc"}},
-        "prompt": {
-            "builder": llm.PromptBuilder(tokenizer=tokenizer, prompt=other_prompt),
-        },
-        "chat_template": {
-            "builder": llm.PromptBuilder(
-                tokenizer=tokenizer,
-                prompt=prompt,
-                chat_template="other",
-            ),
-        },
-        "text_token_limit": {
-            "builder": llm.PromptBuilder(
-                tokenizer=tokenizer,
-                prompt=prompt,
-                text_token_limit=10,
-            ),
-        },
-        "decoding": {
-            "decoding": llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=60),
-        },
-        "chunk_size": {"chunk_size": 3},
-        "pair_order": {"pair_ids": ["c", "b", "a"]},
-    }
-    argument_name, new_value = changes[changed_setting]
-    changed_settings = dict(settings)
-    changed_settings[argument_name] = new_value
-    description = llm.describe_run(**settings)
-    changed = llm.describe_run(**changed_settings)
-    assert changed != description
+    prompt_path = write_prompt_file(tmp_path, CHAT_PROMPT)
+    prompt = llm.load_prompt(prompt_path)
+    engine_settings = {"model": "fake"}
+    builder = llm.PromptBuilder(tokenizer=tokenizer, prompt=prompt)
+    decoding = llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=50)
+    chunk_size = 2
+    pair_ids = ["a", "b", "c"]
+    description = llm.describe_run(
+        engine_settings=engine_settings,
+        builder=builder,
+        decoding=decoding,
+        chunk_size=chunk_size,
+        pair_ids=pair_ids,
+    )
+    # a case name without a branch changes nothing, so the assert below fails for it
+    if changed_setting == "engine":
+        engine_settings = {"model": "fake", "revision": "abc"}
+    elif changed_setting == "prompt":
+        user_only = {"messages": [CHAT_PROMPT["messages"][1]]}
+        other_prompt_path = write_prompt_file(tmp_path, user_only, "other.json")
+        other_prompt = llm.load_prompt(other_prompt_path)
+        builder = llm.PromptBuilder(tokenizer=tokenizer, prompt=other_prompt)
+    elif changed_setting == "chat_template":
+        builder = llm.PromptBuilder(
+            tokenizer=tokenizer,
+            prompt=prompt,
+            chat_template="other",
+        )
+    elif changed_setting == "text_token_limit":
+        builder = llm.PromptBuilder(
+            tokenizer=tokenizer,
+            prompt=prompt,
+            text_token_limit=10,
+        )
+    elif changed_setting == "decoding":
+        decoding = llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=60)
+    elif changed_setting == "chunk_size":
+        chunk_size = 3
+    elif changed_setting == "pair_order":
+        pair_ids = ["c", "b", "a"]
+    changed_description = llm.describe_run(
+        engine_settings=engine_settings,
+        builder=builder,
+        decoding=decoding,
+        chunk_size=chunk_size,
+        pair_ids=pair_ids,
+    )
+    assert changed_description != description
 
 
 class TimedTokenizer(FakeTokenizer):
@@ -554,3 +561,623 @@ class TimedEngine(FakeEngine):
     ) -> list:
         self.clock["now"] += 10.0
         return super().generate(prompts, sampling_params, use_tqdm=use_tqdm)
+
+
+def make_answers_df(pair_ids: list[str], texts: list[str]) -> pd.DataFrame:
+    """Return an answers table as read_answers builds it."""
+    preds = []
+    statuses = []
+    for text in texts:
+        parsed = llm.parse_answer(text)
+        preds.append(parsed.pred)
+        statuses.append(parsed.status)
+    return pd.DataFrame(
+        {
+            "id": pair_ids,
+            "prompt_tokens": [5] * len(pair_ids),
+            "generated_tokens": [3] * len(pair_ids),
+            "finish_reason": ["stop"] * len(pair_ids),
+            "text": texts,
+            # the nullable integer type of read_answers - an unanswered pair keeps <NA>
+            "pred": pd.array(preds, dtype="Int64"),
+            "status": statuses,
+        },
+    )
+
+
+def make_real_tokenizer() -> object:
+    """Return a tiny real Hugging Face tokenizer without a chat template (skips without transformers)."""
+    tokenizers = pytest.importorskip("tokenizers")
+    transformers = pytest.importorskip("transformers")
+    words = [
+        "<unk>",
+        BOS,
+        "</s>",
+        "[INST]",
+        "[/INST]",
+        "<<SYS>>",
+        "<</SYS>>",
+        "Answer",
+        "one",
+        "two",
+    ]
+    vocabulary = {}
+    for index, word in enumerate(words):
+        vocabulary[word] = index
+    backend = tokenizers.Tokenizer(
+        tokenizers.models.WordLevel(vocabulary, unk_token="<unk>"),
+    )
+    backend.pre_tokenizer = tokenizers.pre_tokenizers.WhitespaceSplit()
+    # like the Llama-2 tokenizer, put <s> (BOS, id 1) before every encoded text ($A)
+    backend.post_processor = tokenizers.processors.TemplateProcessing(
+        single=f"{BOS} $A",
+        special_tokens=[(BOS, 1)],
+    )
+    return transformers.PreTrainedTokenizerFast(
+        tokenizer_object=backend,
+        bos_token=BOS,
+        eos_token="</s>",
+        unk_token="<unk>",
+    )
+
+
+def test_prepare_answers_dir_stores_the_run_description(
+    tmp_path: Path,
+    run_description: dict,
+) -> None:
+    """A new folder gets the run description."""
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    stored = json.loads((answers_dir / llm.RUN_FILE).read_text(encoding="utf-8"))
+    assert stored == run_description
+
+
+def test_prepare_answers_dir_names_a_changed_setting_and_changes_nothing(
+    tmp_path: Path,
+    run_description: dict,
+) -> None:
+    """Another setting is refused, and the folder keeps every file, a leftover partial file too."""
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    leftover_path = answers_dir / f"chunk-00000.json{llm.PARTIAL_SUFFIX}"
+    leftover_path.write_text("half", encoding="utf-8")
+    changed_description = dict(run_description)
+    changed_description["chunk_size"] = 3
+    with pytest.raises(RuntimeError, match="chunk_size"):
+        llm.prepare_answers_dir(answers_dir, changed_description)
+    assert leftover_path.is_file()
+
+
+def test_prepare_answers_dir_removes_a_leftover_partial_file(
+    tmp_path: Path,
+    run_description: dict,
+) -> None:
+    """A restart of the same run removes what a killed write left behind."""
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    leftover_path = answers_dir / f"chunk-00001.json{llm.PARTIAL_SUFFIX}"
+    leftover_path.write_text("half", encoding="utf-8")
+    llm.prepare_answers_dir(answers_dir, run_description)
+    assert not leftover_path.exists()
+
+
+def test_prepare_answers_dir_refuses_chunk_files_without_a_run_description(
+    tmp_path: Path,
+    run_description: dict,
+) -> None:
+    """Chunk files whose run.json is gone belong to unknown settings and are not continued."""
+    answers_dir = tmp_path / "answers"
+    answers_dir.mkdir()
+    chunk_path = answers_dir / "chunk-00000.json"
+    chunk_path.write_text(
+        '{"chunk": 0, "seconds": 1.0, "answers": []}',
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="no run.json"):
+        llm.prepare_answers_dir(answers_dir, run_description)
+    assert not (answers_dir / llm.RUN_FILE).exists()
+
+
+def test_split_chunks_keeps_the_order_and_a_short_last_chunk() -> None:
+    """Consecutive chunks of chunk_size ids, the last one shorter."""
+    pair_ids = ["a", "b", "c", "d", "e"]
+    chunk_size = 2
+    assert llm.split_chunks(pair_ids, chunk_size) == [["a", "b"], ["c", "d"], ["e"]]
+
+
+def test_split_chunks_rejects_a_repeated_id() -> None:
+    """A repeated id would give two pairs the prompt of one of them."""
+    pair_ids = ["a", "b", "a"]
+    chunk_size = 2
+    with pytest.raises(ValueError, match="more than once"):
+        llm.split_chunks(pair_ids, chunk_size)
+
+
+def test_split_chunks_rejects_no_ids() -> None:
+    """A run without pairs stops before anything is generated."""
+    pair_ids = []
+    chunk_size = 2
+    with pytest.raises(ValueError, match="no pair ids"):
+        llm.split_chunks(pair_ids, chunk_size)
+
+
+def test_split_chunks_with_a_chunk_larger_than_the_pairs_gives_one_chunk() -> None:
+    """Fewer pairs than chunk_size are one chunk."""
+    pair_ids = ["a", "b", "c"]
+    chunk_size = 256
+    assert llm.split_chunks(pair_ids, chunk_size) == [["a", "b", "c"]]
+
+
+def test_generate_answers_writes_one_file_per_chunk(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """Four pairs in chunks of two are two engine calls and two chunk files."""
+    pairs_df = make_pairs(4)
+    engine = FakeEngine(make_engine_answers(4), chat_builder.tokenizer)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    generated = llm.generate_answers(
+        engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+    )
+    assert generated == 2
+    assert engine.prompts_per_call == [2, 2]
+    assert llm.find_finished_chunks(answers_dir) == {0, 1}
+
+
+def test_generate_answers_generates_only_the_missing_chunks(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """After the engine died in the second chunk, the restart generates only that chunk."""
+    pairs_df = make_pairs(4)
+    answers = make_engine_answers(4)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    failing_engine = FakeEngine(answers, chat_builder.tokenizer, fail_at_call=2)
+    with pytest.raises(RuntimeError, match="died"):
+        llm.generate_answers(
+            failing_engine,
+            SAMPLING_PARAMS,
+            chat_builder,
+            pairs_df,
+            answers_dir,
+            CHUNK_SIZE,
+        )
+    restarted_engine = FakeEngine(answers, chat_builder.tokenizer)
+    generated = llm.generate_answers(
+        restarted_engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+    )
+    assert generated == 1
+    assert restarted_engine.prompts_per_call == [2]
+
+
+def test_generate_answers_after_a_finished_run_calls_no_engine(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """A complete answers folder makes no engine call."""
+    pairs_df = make_pairs(4)
+    answers = make_engine_answers(4)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    first_engine = FakeEngine(answers, chat_builder.tokenizer)
+    llm.generate_answers(
+        first_engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+    )
+    engine = FakeEngine(answers, chat_builder.tokenizer)
+    generated = llm.generate_answers(
+        engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+    )
+    assert generated == 0
+    assert engine.prompts_per_call == []
+
+
+def test_generate_answers_rejects_outputs_of_other_prompts(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """Outputs in another order than the prompts stop the run before the chunk is written."""
+    pairs_df = make_pairs(4)
+    engine = FakeEngine(make_engine_answers(4), chat_builder.tokenizer)
+    engine.reverse_outputs = True
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    with pytest.raises(RuntimeError, match="another prompt"):
+        llm.generate_answers(
+            engine,
+            SAMPLING_PARAMS,
+            chat_builder,
+            pairs_df,
+            answers_dir,
+            CHUNK_SIZE,
+        )
+    assert llm.find_finished_chunks(answers_dir) == set()
+
+
+def test_generate_answers_rejects_a_missing_output(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """An engine that returns fewer outputs than prompts stops the run before the chunk is written."""
+    pairs_df = make_pairs(4)
+    engine = FakeEngine(make_engine_answers(4), chat_builder.tokenizer)
+    engine.drop_last_output = True
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    with pytest.raises(RuntimeError, match="outputs for"):
+        llm.generate_answers(
+            engine,
+            SAMPLING_PARAMS,
+            chat_builder,
+            pairs_df,
+            answers_dir,
+            CHUNK_SIZE,
+        )
+    assert llm.find_finished_chunks(answers_dir) == set()
+
+
+def test_generate_answers_leaves_no_chunk_file_when_the_write_fails(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A write that fails before its rename leaves only the temporary file, never a chunk file."""
+    pairs_df = make_pairs(4)
+    engine = FakeEngine(make_engine_answers(4), chat_builder.tokenizer)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+
+    def fail_to_replace(source: Path, target: Path) -> None:
+        raise OSError("no space left on the device")
+
+    monkeypatch.setattr(llm.os, "replace", fail_to_replace)
+    with pytest.raises(OSError, match="no space"):
+        llm.generate_answers(
+            engine,
+            SAMPLING_PARAMS,
+            chat_builder,
+            pairs_df,
+            answers_dir,
+            CHUNK_SIZE,
+        )
+    assert llm.find_finished_chunks(answers_dir) == set()
+    assert list(answers_dir.glob(f"*{llm.PARTIAL_SUFFIX}")) != []
+
+
+def test_generate_answers_times_only_the_engine_call(
+    tmp_path: Path,
+    run_description: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The seconds of a chunk are the time of its engine call, not of building its prompts."""
+    clock = {"now": 0.0}
+    tokenizer = TimedTokenizer(clock)
+    prompt = llm.load_prompt(write_prompt_file(tmp_path, CHAT_PROMPT))
+    builder = llm.PromptBuilder(tokenizer=tokenizer, prompt=prompt)
+    engine = TimedEngine(make_engine_answers(4), tokenizer, clock)
+    pairs_df = make_pairs(4)
+    answers_dir = tmp_path / "answers"
+    chunk_size = 2
+    llm.prepare_answers_dir(answers_dir, run_description)
+
+    def read_fake_clock() -> float:
+        return clock["now"]
+
+    monkeypatch.setattr(llm.time, "monotonic", read_fake_clock)
+    llm.generate_answers(
+        engine,
+        SAMPLING_PARAMS,
+        builder,
+        pairs_df,
+        answers_dir,
+        chunk_size,
+    )
+    chunk = json.loads((answers_dir / "chunk-00000.json").read_text(encoding="utf-8"))
+    assert chunk["seconds"] == 10.0
+
+
+def test_read_answers_parses_every_pair_in_order(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """The answers come back in pair order with their parsed prediction."""
+    pairs_df = make_pairs(4)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    engine = FakeEngine(make_engine_answers(4), chat_builder.tokenizer)
+    llm.generate_answers(
+        engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+    )
+    pair_ids = pairs_df["id"].tolist()
+    generated = llm.read_answers(answers_dir, pair_ids, CHUNK_SIZE)
+    assert generated.answers_df["id"].tolist() == pairs_df["id"].tolist()
+    assert generated.answers_df["pred"].tolist() == [1, 0, 1, 0]
+    assert generated.answers_df["finish_reason"].tolist() == ["stop"] * 4
+    assert (
+        generated.answers_df["generated_tokens"].tolist()
+        == [len(JSON_TRUE.split()), len(JSON_FALSE.split())] * 2
+    )
+    expected_prompt_tokens = llm.count_prompt_tokens(chat_builder, pairs_df).tolist()
+    assert generated.answers_df["prompt_tokens"].tolist() == expected_prompt_tokens
+
+
+def test_read_answers_raises_for_a_missing_chunk(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """An unfinished generation can not be read."""
+    pairs_df = make_pairs(4)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    pair_ids = pairs_df["id"].tolist()
+    engine = FakeEngine(make_engine_answers(4), chat_builder.tokenizer, fail_at_call=2)
+    with pytest.raises(RuntimeError, match="died"):
+        llm.generate_answers(
+            engine,
+            SAMPLING_PARAMS,
+            chat_builder,
+            pairs_df,
+            answers_dir,
+            CHUNK_SIZE,
+        )
+    with pytest.raises(RuntimeError, match="missing"):
+        llm.read_answers(answers_dir, pair_ids, CHUNK_SIZE)
+
+
+def test_read_answers_rejects_a_chunk_of_other_pairs(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """Chunk files of another pair order are refused."""
+    pairs_df = make_pairs(4)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    engine = FakeEngine(make_engine_answers(4), chat_builder.tokenizer)
+    llm.generate_answers(
+        engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+    )
+    reordered_ids = list(reversed(pairs_df["id"].tolist()))
+    with pytest.raises(RuntimeError, match="other pairs"):
+        llm.read_answers(answers_dir, reordered_ids, CHUNK_SIZE)
+
+
+def test_read_answers_sums_the_seconds_of_every_chunk(tmp_path: Path) -> None:
+    """The generation time is the sum of the stored chunk times."""
+    answers_dir = tmp_path / "answers"
+    answers_dir.mkdir()
+    pair_ids = ["a", "b"]
+    chunk_seconds = [1.5, 2.25]
+    for index in range(len(pair_ids)):
+        record = {
+            "id": pair_ids[index],
+            "prompt_tokens": 3,
+            "generated_tokens": 2,
+            "finish_reason": "stop",
+            "text": JSON_TRUE,
+        }
+        chunk = {"chunk": index, "seconds": chunk_seconds[index], "answers": [record]}
+        chunk_path = answers_dir / f"chunk-{index:05d}.json"
+        chunk_path.write_text(json.dumps(chunk), encoding="utf-8")
+    chunk_size = 1
+    generated = llm.read_answers(answers_dir, pair_ids, chunk_size)
+    assert generated.generation_seconds == 3.75
+
+
+@pytest.mark.parametrize(
+    ("unanswered_pred", "unanswered_score", "expected_pred", "expected_score"),
+    [(0, 0.5, [1, 0, 0], [1.0, 0.0, 0.5]), (1, 0.0, [1, 0, 1], [1.0, 0.0, 0.0])],
+)
+def test_build_prediction_tables_applies_the_unanswered_rule(
+    unanswered_pred: int,
+    unanswered_score: float,
+    expected_pred: list[int],
+    expected_score: list[float],
+) -> None:
+    """An unanswered pair gets the given pred and score, an answered one 1,0 or 0,0."""
+    pairs_df = pd.DataFrame({"id": ["a", "b", "c"], "same": [True, False, True]})
+    answers_df = make_answers_df(["a", "b", "c"], [JSON_TRUE, JSON_FALSE, "no idea"])
+    tables = llm.build_prediction_tables(
+        pairs_df,
+        answers_df,
+        unanswered_pred,
+        unanswered_score,
+    )
+    assert tables.predictions_df["pred"].tolist() == expected_pred
+    assert tables.predictions_df["score"].tolist() == expected_score
+    assert tables.unanswered_df["id"].tolist() == ["c"]
+
+
+def test_build_prediction_tables_keeps_an_empty_unanswered_table() -> None:
+    """Without unanswered pairs the table exists with its columns and no row."""
+    pairs_df = pd.DataFrame({"id": ["a"], "same": [True]})
+    answers_df = make_answers_df(["a"], [JSON_TRUE])
+    tables = llm.build_prediction_tables(
+        pairs_df,
+        answers_df,
+        UNANSWERED_PRED,
+        UNANSWERED_SCORE,
+    )
+    assert tables.unanswered_df.empty
+    assert tables.unanswered_df.columns.tolist() == llm.UNANSWERED_COLUMNS
+
+
+def test_build_prediction_tables_keep_no_text_in_the_generation_table() -> None:
+    """The generation table holds token counts and short codes, never the generated text."""
+    pairs_df = pd.DataFrame({"id": ["a"], "same": [True]})
+    answers_df = make_answers_df(["a"], [JSON_TRUE])
+    tables = llm.build_prediction_tables(
+        pairs_df,
+        answers_df,
+        UNANSWERED_PRED,
+        UNANSWERED_SCORE,
+    )
+    assert tables.generation_df.columns.tolist() == [
+        "id",
+        "prompt_tokens",
+        "generated_tokens",
+        "finish_reason",
+        "status",
+    ]
+
+
+def test_build_prediction_tables_names_the_unanswered_columns() -> None:
+    """The unanswered table has the columns id, status and finish_reason, in this order."""
+    pairs_df = pd.DataFrame({"id": ["a"], "same": [True]})
+    answers_df = make_answers_df(["a"], ["no idea"])
+    tables = llm.build_prediction_tables(
+        pairs_df,
+        answers_df,
+        UNANSWERED_PRED,
+        UNANSWERED_SCORE,
+    )
+    assert tables.unanswered_df.columns.tolist() == ["id", "status", "finish_reason"]
+    assert tables.unanswered_df["status"].tolist() == [llm.NO_ANSWER]
+
+
+def test_build_prediction_tables_rejects_answers_of_other_pairs() -> None:
+    """Answers in another order than the pairs are refused."""
+    pairs_df = pd.DataFrame({"id": ["a", "b"], "same": [True, False]})
+    answers_df = make_answers_df(["b", "a"], [JSON_TRUE, JSON_FALSE])
+    with pytest.raises(ValueError, match="every pair once"):
+        llm.build_prediction_tables(
+            pairs_df,
+            answers_df,
+            UNANSWERED_PRED,
+            UNANSWERED_SCORE,
+        )
+
+
+@pytest.mark.parametrize(
+    ("unanswered_pred", "unanswered_score"),
+    [(2, 0.5), (0, float("nan"))],
+)
+def test_build_prediction_tables_rejects_a_bad_unanswered_rule(
+    unanswered_pred: int,
+    unanswered_score: float,
+) -> None:
+    """The unanswered rule has to be a 0 / 1 prediction with a finite score."""
+    pairs_df = pd.DataFrame({"id": ["a"], "same": [True]})
+    answers_df = make_answers_df(["a"], ["no idea"])
+    with pytest.raises(ValueError, match="Unanswered"):
+        llm.build_prediction_tables(
+            pairs_df,
+            answers_df,
+            unanswered_pred,
+            unanswered_score,
+        )
+
+
+def test_build_prediction_tables_pass_the_checks_of_the_run_folder(
+    tmp_path: Path,
+) -> None:
+    """write_run_files accepts the three tables as they are."""
+    pairs_df = pd.DataFrame({"id": ["a", "b"], "same": [True, False]})
+    answers_df = make_answers_df(["a", "b"], [JSON_TRUE, "no idea"])
+    tables = llm.build_prediction_tables(
+        pairs_df,
+        answers_df,
+        UNANSWERED_PRED,
+        UNANSWERED_SCORE,
+    )
+    context = tracking.RunContext(environment={"commit": "abc"}, packages={})
+    run_dir = tmp_path / "run_v2"
+    tracking.write_run_files(
+        run_dir,
+        context=context,
+        params={},
+        metrics={},
+        tables={
+            "predictions-test": tables.predictions_df,
+            "unanswered-test": tables.unanswered_df,
+            "generation-test": tables.generation_df,
+        },
+        figures={},
+    )
+    assert (run_dir / "unanswered-test.csv").is_file()
+
+
+def test_real_chat_template_gives_one_begin_token(tmp_path: Path) -> None:
+    """The template's own begin token is the only one - the rendered ids get no second one."""
+    tokenizer = make_real_tokenizer()
+    chat_template = (PROMPT_DIR / LLAMA2_TEMPLATE_FILE).read_text(encoding="utf-8")
+    prompt = llm.load_prompt(
+        write_prompt_file(
+            tmp_path,
+            {
+                "messages": [
+                    {"role": "system", "content": "Answer"},
+                    {"role": "user", "content": "{text1} {text2}"},
+                ],
+            },
+        ),
+    )
+    builder = llm.PromptBuilder(
+        tokenizer=tokenizer,
+        prompt=prompt,
+        chat_template=chat_template,
+    )
+    text1 = "one"
+    text2 = "two"
+    token_ids = builder.build_token_ids(text1, text2)
+    assert token_ids.count(tokenizer.bos_token_id) == 1
+    assert tokenizer.convert_ids_to_tokens(token_ids) == [
+        BOS,
+        "[INST]",
+        "<<SYS>>",
+        "Answer",
+        "<</SYS>>",
+        "one",
+        "two",
+        "[/INST]",
+    ]
+
+
+def test_real_tokenizer_without_a_template_raises(tmp_path: Path) -> None:
+    """A tokenizer without a chat template and no given template stops the prompt building."""
+    tokenizer = make_real_tokenizer()
+    prompt = llm.load_prompt(write_prompt_file(tmp_path, CHAT_PROMPT))
+    builder = llm.PromptBuilder(tokenizer=tokenizer, prompt=prompt)
+    text1 = "one"
+    text2 = "two"
+    with pytest.raises(ValueError, match="chat_template"):
+        builder.build_token_ids(text1, text2)
