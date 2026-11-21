@@ -374,3 +374,132 @@ def test_parse_answer_reads_the_answer_value(text: str, expected_pred: int) -> N
     """A JSON or Python boolean of the answer key, quoted or not, up to the end of the value."""
     parsed = llm.parse_answer(text)
     assert parsed == llm.ParsedAnswer(pred=expected_pred, status=llm.ANSWERED)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "The texts were written by the same author.",
+        '{"analysis": "x", "answer": "yes"}',
+        '{"analysis": "x", "Answer": true}',
+        '{"analysis": "x", "answer": trueish}',
+        '"answer":  A boolean (True/False) answer.',
+        '{"analysis": "x", "answer": "True/False"}',
+        '{"analysis": "x", "answer": true or false}',
+        '{"analysis": "x", "answer": True|False}',
+        '{"analysis": "x", "answer": True (the texts share a style)}',
+        '"answer": True - the same author.',
+        '{"analysis": "x", "answer": "True."}',
+        '{"analysis": "x", "answer": "True}',
+    ],
+)
+def test_parse_answer_without_a_boolean_answer_value_is_unanswered(text: str) -> None:
+    """Without "answer" followed by a whole boolean the pair has no answer."""
+    parsed = llm.parse_answer(text)
+    assert parsed == llm.ParsedAnswer(pred=None, status=llm.NO_ANSWER)
+
+
+def test_parse_answer_with_agreeing_values_is_answered() -> None:
+    """The same value twice is one answer."""
+    text = f"{JSON_TRUE} and once more {JSON_TRUE}"
+    parsed = llm.parse_answer(text)
+    assert parsed == llm.ParsedAnswer(pred=llm.SAME_AUTHOR, status=llm.ANSWERED)
+
+
+def test_parse_answer_with_both_values_is_unanswered() -> None:
+    """Two different answer values are not an answer."""
+    text = f"{JSON_TRUE} or maybe {JSON_FALSE}"
+    parsed = llm.parse_answer(text)
+    assert parsed == llm.ParsedAnswer(pred=None, status=llm.CONFLICTING_ANSWERS)
+
+
+def test_parse_answer_ignores_true_outside_the_answer_value() -> None:
+    """A "true" in the reasoning does not decide the answer."""
+    text = '{"analysis": "It is true that both use commas, True.", "answer": false}'
+    parsed = llm.parse_answer(text)
+    assert parsed.pred == llm.DIFFERENT_AUTHOR
+
+
+def test_check_prompt_lengths_rejects_a_prompt_without_room() -> None:
+    """A prompt of max_model_len tokens leaves no room for one generated token."""
+    prompt_tokens = pd.Series([10, 16], index=["id-0", "id-1"])
+    max_model_len = 16
+    with pytest.raises(ValueError, match="id-1"):
+        llm.check_prompt_lengths(prompt_tokens, max_model_len)
+
+
+def test_check_prompt_lengths_accepts_room_for_one_token() -> None:
+    """A prompt of max_model_len - 1 tokens can still be answered."""
+    prompt_tokens = pd.Series([10, 15], index=["id-0", "id-1"])
+    max_model_len = 16
+    llm.check_prompt_lengths(prompt_tokens, max_model_len)
+
+
+def test_count_prompt_tokens_counts_every_pair(chat_builder: llm.PromptBuilder) -> None:
+    """The count of a pair is the length of its prompt token ids."""
+    pairs_df = make_pairs(2)
+    counts = llm.count_prompt_tokens(chat_builder, pairs_df)
+    expected = []
+    for text1, text2 in pairs_df["pair"]:
+        expected.append(len(chat_builder.build_token_ids(text1, text2)))
+    assert counts.tolist() == expected
+    assert counts.index.tolist() == ["id-0", "id-1"]
+
+
+@pytest.mark.parametrize(
+    "changed_setting",
+    [
+        "engine",
+        "prompt",
+        "chat_template",
+        "text_token_limit",
+        "decoding",
+        "chunk_size",
+        "pair_order",
+    ],
+)
+def test_describe_run_changes_with_each_setting(
+    tmp_path: Path,
+    changed_setting: str,
+) -> None:
+    """Every setting that can change a generated text changes the description."""
+    tokenizer = FakeTokenizer()
+    prompt = llm.load_prompt(write_prompt_file(tmp_path, CHAT_PROMPT))
+    user_only = {"messages": [CHAT_PROMPT["messages"][1]]}
+    other_prompt = llm.load_prompt(write_prompt_file(tmp_path, user_only, "other.json"))
+    settings = {
+        "engine_settings": {"model": "fake"},
+        "builder": llm.PromptBuilder(tokenizer=tokenizer, prompt=prompt),
+        "decoding": llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=50),
+        "chunk_size": 2,
+        "pair_ids": ["a", "b", "c"],
+    }
+    changes = {
+        "engine": {"engine_settings": {"model": "fake", "revision": "abc"}},
+        "prompt": {
+            "builder": llm.PromptBuilder(tokenizer=tokenizer, prompt=other_prompt),
+        },
+        "chat_template": {
+            "builder": llm.PromptBuilder(
+                tokenizer=tokenizer,
+                prompt=prompt,
+                chat_template="other",
+            ),
+        },
+        "text_token_limit": {
+            "builder": llm.PromptBuilder(
+                tokenizer=tokenizer,
+                prompt=prompt,
+                text_token_limit=10,
+            ),
+        },
+        "decoding": {
+            "decoding": llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=60),
+        },
+        "chunk_size": {"chunk_size": 3},
+        "pair_order": {"pair_ids": ["c", "b", "a"]},
+    }
+    description = llm.describe_run(**settings)
+    changed = llm.describe_run(**{**settings, **changes[changed_setting]})
+    assert changed != description
