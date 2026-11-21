@@ -124,6 +124,36 @@ class FakeTokenizer:
             return {"input_ids": token_ids}
         return token_ids
 
+def write_prompt_file(folder: Path, content: dict, name: str = "prompt.json") -> Path:
+    """Write a prompt file and return its path."""
+    path = folder / name
+    # the layout of the prompt files of the repository - not the bytes of json.dumps
+    path.write_text(json.dumps(content, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def make_pairs(n_pairs: int) -> pd.DataFrame:
+    """Return pairs whose first text holds the word pair-<i>, so the fake engine knows the pair."""
+    pair_ids = []
+    pairs = []
+    same = []
+    for index in range(n_pairs):
+        pair_ids.append(f"id-{index}")
+        pairs.append([f"pair-{index} alpha beta", f"gamma delta {index}"])
+        same.append(index % 2 == 0)
+    return pd.DataFrame({"id": pair_ids, "pair": pairs, "same": same})
+
+
+def make_engine_answers(n_pairs: int) -> dict[str, str]:
+    """Return a true answer for the even pairs and a false answer for the odd ones."""
+    answers = {}
+    for index in range(n_pairs):
+        if index % 2 == 0:
+            answers[f"pair-{index}"] = JSON_TRUE
+        else:
+            answers[f"pair-{index}"] = JSON_FALSE
+    return answers
+
 class FakeEngine:
     """Engine with the generate interface of vllm.LLM - the answer text of a pair comes from its id word."""
 
@@ -133,18 +163,34 @@ class FakeEngine:
         tokenizer: FakeTokenizer,
         fail_at_call: int | None = None,
     ) -> None:
+        # the answer text of every pair, by the marker word in its first text (pair-0, pair-1, ...)
         self.answers = answers
         self.tokenizer = tokenizer
-        self.fail_at_call = fail_at_call
+        # the number of prompts of every generate call so far
         self.prompts_per_call: list[int] = []
+        # the failures a test can switch on
+        self.fail_at_call = fail_at_call
         self.reverse_outputs = False
         self.drop_last_output = False
 
     def _answer_for(self, prompt_ids: list[int]) -> str:
-        for word in self.tokenizer.decode(prompt_ids).split():
-            if word in self.answers:
-                return self.answers[word]
-        raise KeyError("The prompt holds no word of a pair.")
+        """Return the answer of the pair whose marker word is in the prompt.
+
+        The engine gets only token ids, so the marker word is how it knows the pair of a prompt.
+        """
+        prompt_words = self.tokenizer.decode(prompt_ids).split()
+        for marker_word, answer in self.answers.items():
+            if marker_word in prompt_words:
+                return answer
+        raise KeyError("The prompt holds no marker word of a pair.")
+
+    def _output_for(self, prompt_ids: list[int]) -> SimpleNamespace:
+        # the attributes of a vllm.RequestOutput and its first completion that the module reads
+        text = self._answer_for(prompt_ids)
+        completion = SimpleNamespace(
+            text=text, token_ids=text.split(), finish_reason="stop"
+        )
+        return SimpleNamespace(prompt_token_ids=prompt_ids, outputs=[completion])
 
     def generate(
         self,
@@ -154,17 +200,12 @@ class FakeEngine:
         use_tqdm: bool,
     ) -> list:
         self.prompts_per_call.append(len(prompts))
-        if self.fail_at_call == len(self.prompts_per_call):
+        call_number = len(self.prompts_per_call)
+        if call_number == self.fail_at_call:
             raise RuntimeError("the engine died")
         outputs = []
         for prompt in prompts:
-            prompt_ids = prompt["prompt_token_ids"]
-            text = self._answer_for(prompt_ids)
-            completion = SimpleNamespace(
-                text=text, token_ids=text.split(), finish_reason="stop"
-            )
-            output = SimpleNamespace(prompt_token_ids=prompt_ids, outputs=[completion])
-            outputs.append(output)
+            outputs.append(self._output_for(prompt["prompt_token_ids"]))
         if self.drop_last_output:
             outputs.pop()
         if self.reverse_outputs:
