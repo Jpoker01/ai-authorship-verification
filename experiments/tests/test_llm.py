@@ -83,11 +83,14 @@ class FakeTokenizer:
         max_length: int | None = None,
         add_special_tokens: bool = True,
     ) -> dict[str, list[int]]:
-        token_ids = [self._token_id(word) for word in text.split()]
+        token_ids = []
+        if add_special_tokens:
+            token_ids.append(self._token_id(BOS))
+        for word in text.split():
+            token_ids.append(self._token_id(word))
+        # as in a Hugging Face tokenizer, the begin token counts towards max_length
         if truncation:
             token_ids = token_ids[:max_length]
-        if add_special_tokens:
-            token_ids.insert(0, self._token_id(BOS))
         return {"input_ids": token_ids}
 
     def decode(self, token_ids: list[int], skip_special_tokens: bool = False) -> str:
@@ -192,9 +195,11 @@ class FakeEngine:
     def _output_for(self, prompt_ids: list[int]) -> SimpleNamespace:
         # the attributes of a vllm.RequestOutput and its first completion that the module reads
         text = self._answer_for(prompt_ids)
+        # one token per word and the end token, so the token count is not the word count
+        token_ids = text.split() + ["</s>"]
         completion = SimpleNamespace(
             text=text,
-            token_ids=text.split(),
+            token_ids=token_ids,
             finish_reason="stop",
         )
         return SimpleNamespace(prompt_token_ids=prompt_ids, outputs=[completion])
@@ -284,16 +289,32 @@ def test_shipped_prompt_has_the_v1_llama2_wording() -> None:
     assert prompt.messages == expected_messages
 
 
-def test_build_token_ids_fills_each_text_once(chat_builder: llm.PromptBuilder) -> None:
-    """A placeholder inside a text is kept as it is - the inserted texts are not searched again."""
-    text1 = "uses {text2} literally"
-    text2 = "plain"
+@pytest.mark.parametrize(
+    ("text1", "text2", "expected_user_part"),
+    [
+        (
+            "uses {text2} literally",
+            "plain",
+            "First uses {text2} literally second plain end",
+        ),
+        (
+            "plain",
+            "uses {text1} literally",
+            "First plain second uses {text1} literally end",
+        ),
+    ],
+)
+def test_build_token_ids_fills_each_text_once(
+    chat_builder: llm.PromptBuilder,
+    text1: str,
+    text2: str,
+    expected_user_part: str,
+) -> None:
+    """A placeholder inside either text is kept as it is - the inserted texts are not searched again."""
     token_ids = chat_builder.build_token_ids(text1, text2)
     rendered = chat_builder.tokenizer.decode(token_ids)
-    assert (
-        rendered
-        == f"{BOS} <system> Answer in JSON. <user> First uses {{text2}} literally second plain end <assistant>"
-    )
+    expected = f"{BOS} <system> Answer in JSON. <user> {expected_user_part} <assistant>"
+    assert rendered == expected
 
 
 def test_build_token_ids_asks_for_the_generation_prompt(
@@ -454,7 +475,11 @@ def test_count_prompt_tokens_counts_every_pair(chat_builder: llm.PromptBuilder) 
         "prompt",
         "chat_template",
         "text_token_limit",
-        "decoding",
+        "engine_option",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "seed",
         "chunk_size",
         "pair_order",
     ],
@@ -482,6 +507,8 @@ def test_describe_run_changes_with_each_setting(
     # a case name without a branch changes nothing, so the assert below fails for it
     if changed_setting == "engine":
         engine_settings = {"model": "fake", "revision": "abc"}
+    elif changed_setting == "engine_option":
+        engine_settings = {"model": "fake", "max_num_seqs": 8}
     elif changed_setting == "prompt":
         user_only = {"messages": [CHAT_PROMPT["messages"][1]]}
         other_prompt_path = write_prompt_file(tmp_path, user_only, "other.json")
@@ -499,8 +526,19 @@ def test_describe_run_changes_with_each_setting(
             prompt=prompt,
             text_token_limit=10,
         )
-    elif changed_setting == "decoding":
+    elif changed_setting == "max_tokens":
         decoding = llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=60)
+    elif changed_setting == "temperature":
+        decoding = llm.DecodingSettings(temperature=0.7, top_p=1.0, max_tokens=50)
+    elif changed_setting == "top_p":
+        decoding = llm.DecodingSettings(temperature=0.0, top_p=0.9, max_tokens=50)
+    elif changed_setting == "seed":
+        decoding = llm.DecodingSettings(
+            temperature=0.0,
+            top_p=1.0,
+            max_tokens=50,
+            seed=42,
+        )
     elif changed_setting == "chunk_size":
         chunk_size = 3
     elif changed_setting == "pair_order":
@@ -659,6 +697,20 @@ def test_prepare_answers_dir_removes_a_leftover_partial_file(
     leftover_path.write_text("half", encoding="utf-8")
     llm.prepare_answers_dir(answers_dir, run_description)
     assert not leftover_path.exists()
+
+
+def test_prepare_answers_dir_accepts_a_restart_with_a_tuple_setting(
+    tmp_path: Path,
+    run_description: dict,
+) -> None:
+    """A tuple setting is stored as a JSON list, and a restart with the same tuple is accepted."""
+    answers_dir = tmp_path / "answers"
+    description = dict(run_description)
+    description["engine_settings"] = {"model": "fake", "stop": ("a", "b")}
+    llm.prepare_answers_dir(answers_dir, description)
+    llm.prepare_answers_dir(answers_dir, description)
+    stored = json.loads((answers_dir / llm.RUN_FILE).read_text(encoding="utf-8"))
+    assert stored["engine_settings"]["stop"] == ["a", "b"]
 
 
 def test_prepare_answers_dir_refuses_chunk_files_without_a_run_description(
@@ -926,9 +978,14 @@ def test_read_answers_parses_every_pair_in_order(
     assert generated.answers_df["id"].tolist() == pairs_df["id"].tolist()
     assert generated.answers_df["pred"].tolist() == [1, 0, 1, 0]
     assert generated.answers_df["finish_reason"].tolist() == ["stop"] * 4
+    # the words of each answer and the end token of the fake engine
+    expected_generated_tokens = [
+        len(JSON_TRUE.split()) + 1,
+        len(JSON_FALSE.split()) + 1,
+    ]
     assert (
         generated.answers_df["generated_tokens"].tolist()
-        == [len(JSON_TRUE.split()), len(JSON_FALSE.split())] * 2
+        == expected_generated_tokens * 2
     )
     expected_prompt_tokens = llm.count_prompt_tokens(chat_builder, pairs_df).tolist()
     assert generated.answers_df["prompt_tokens"].tolist() == expected_prompt_tokens

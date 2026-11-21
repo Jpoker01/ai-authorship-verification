@@ -235,7 +235,6 @@ def test_build_classifier_sets_the_searched_and_the_fixed_params(
 
     classifier = build_classifier(classifier_name, params, n_jobs=n_jobs)
 
-    set_params = classifier.get_params()
     actual_params = classifier.get_params()
     assert isinstance(classifier, classifiers.CLASSIFIER_CLASSES[classifier_name])
 
@@ -245,8 +244,6 @@ def test_build_classifier_sets_the_searched_and_the_fixed_params(
         assert actual_params[name] == value
     if classifier_name in classifiers.THREADED_CLASSIFIERS:
         assert actual_params["n_jobs"] == n_jobs
-    if classifier_name in classifiers.THREADED_CLASSIFIERS:
-        assert set_params["n_jobs"] == n_jobs
 
 
 @pytest.mark.parametrize(
@@ -297,3 +294,79 @@ def test_build_classifier_takes_exactly_the_searched_params(
 
     with pytest.raises(ValueError, match="linear_svc takes the params"):
         build_classifier(classifier_name, params, n_jobs=n_jobs)
+
+
+def test_build_classifier_puts_an_unfitted_copy_of_the_scaler_in_front(
+    pairs_data: tuple[sp.csr_matrix, np.ndarray],
+) -> None:
+    """With a scaler the result is a pipeline of a copy of it and the classifier."""
+    X, y = pairs_data
+    classifier_name = "linear_svc"
+    scaler = StandardScaler(with_mean=False)
+    params = {"C": 1.0, "loss": "squared_hinge", "class_weight": None}
+    n_jobs = 1
+
+    pipeline = build_classifier(classifier_name, params, n_jobs=n_jobs, scaler=scaler)
+    pipeline.fit(X, y)
+
+    assert isinstance(pipeline, Pipeline)
+    assert pipeline.named_steps["scaler"] is not scaler
+    assert not hasattr(scaler, "scale_")
+    assert pipeline.named_steps["classifier"].get_params()["C"] == 1.0
+
+
+@pytest.mark.parametrize("classifier_name", CLASSIFIER_NAMES)
+def test_predict_pairs_decides_with_predict_and_scores_with_the_probability(
+    classifier_name: str,
+    pairs_data: tuple[sp.csr_matrix, np.ndarray],
+) -> None:
+    """pred is predict as 0 / 1 (fitted on bool labels); score is the class-1 probability or the decision function."""
+    X, y = pairs_data
+    classifier = _fitted(classifier_name, X, y)
+    score_method = getattr(classifier, SCORE_METHODS[classifier_name])
+    expected_score = score_method(X)
+    if expected_score.ndim == 2:
+        expected_score = expected_score[:, 1]
+    expected_pred = classifier.predict(X).astype(int)
+
+    predictions = predict_pairs(classifier, classifier_name, X)
+
+    assert predictions.pred.dtype == np.dtype(int)
+    assert np.array_equal(predictions.pred, expected_pred)
+    assert predictions.score.dtype == np.float64
+    assert np.array_equal(predictions.score, expected_score.astype(np.float64))
+
+
+def test_predict_pairs_keeps_the_decision_of_predict_on_a_linear_svc_tie(
+    pairs_data: tuple[sp.csr_matrix, np.ndarray],
+) -> None:
+    """A LinearSVC score of exactly 0 is "different author", as its predict says (score > 0)."""
+    X, y = pairs_data
+    classifier_name = "linear_svc"
+    classifier = _fitted(classifier_name, X, y)
+    # every decision value becomes exactly 0
+    classifier.coef_[:] = 0.0
+    classifier.intercept_[:] = 0.0
+    expected_pred = np.zeros(X.shape[0], dtype=int)
+
+    predictions = predict_pairs(classifier, classifier_name, X)
+
+    assert np.all(predictions.score == 0.0)
+    assert np.array_equal(predictions.pred, expected_pred)
+
+
+def test_predict_pairs_keeps_the_decision_of_predict_on_a_knn_tie() -> None:
+    """Two neighbours that disagree give the probability 0.5 and "different author"."""
+    X_fit = sp.csr_matrix(np.array([[0.0, 1.0], [0.0, 3.0]]))
+    y_fit = np.array([True, False])
+    X_target = sp.csr_matrix(np.array([[0.0, 2.0]]))
+    classifier_name = "k-nearest_neighbors"
+    params = {"n_neighbors": 2, "weights": "uniform", "metric": "euclidean"}
+    n_jobs = 1
+    classifier = build_classifier(classifier_name, params, n_jobs=n_jobs)
+    classifier.fit(X_fit, y_fit)
+
+    predictions = predict_pairs(classifier, classifier_name, X_target)
+
+    assert predictions.score.tolist() == [0.5]
+    assert predictions.pred.tolist() == [0]
