@@ -60,7 +60,9 @@ class FakeTokenizer:
     """Word-level tokenizer with the methods and parameter names of a Hugging Face tokenizer."""
 
     def __init__(
-        self, chat_template: str | None = "fake-template", decode_prefix: str = ""
+        self,
+        chat_template: str | None = "fake-template",
+        decode_prefix: str = "",
     ) -> None:
         self.chat_template = chat_template
         # a sentencepiece tokenizer decodes the first word with its leading space
@@ -105,10 +107,10 @@ class FakeTokenizer:
         template = chat_template if chat_template is not None else self.chat_template
         if template is None:
             raise ValueError(
-                "tokenizer.chat_template is not set and no template argument was passed"
+                "tokenizer.chat_template is not set and no template argument was passed",
             )
         self.chat_calls.append(
-            {"template": template, "add_generation_prompt": add_generation_prompt}
+            {"template": template, "add_generation_prompt": add_generation_prompt},
         )
         words = [BOS]
         for message in conversation:
@@ -191,7 +193,9 @@ class FakeEngine:
         # the attributes of a vllm.RequestOutput and its first completion that the module reads
         text = self._answer_for(prompt_ids)
         completion = SimpleNamespace(
-            text=text, token_ids=text.split(), finish_reason="stop"
+            text=text,
+            token_ids=text.split(),
+            finish_reason="stop",
         )
         return SimpleNamespace(prompt_token_ids=prompt_ids, outputs=[completion])
 
@@ -214,3 +218,159 @@ class FakeEngine:
         if self.reverse_outputs:
             outputs.reverse()
         return outputs
+
+
+@pytest.fixture
+def chat_builder(tmp_path: Path) -> llm.PromptBuilder:
+    """A prompt builder of the chat prompt with a fake tokenizer."""
+    prompt = llm.load_prompt(write_prompt_file(tmp_path, CHAT_PROMPT))
+    return llm.PromptBuilder(tokenizer=FakeTokenizer(), prompt=prompt)
+
+
+@pytest.fixture
+def run_description(chat_builder: llm.PromptBuilder) -> dict:
+    """The description of a run of four pairs in chunks of two."""
+    pair_ids = make_pairs(4)["id"].tolist()
+    decoding = llm.DecodingSettings(temperature=0.0, top_p=1.0, max_tokens=50)
+    engine_settings = {"model": "fake"}
+    return llm.describe_run(
+        engine_settings,
+        chat_builder,
+        decoding,
+        CHUNK_SIZE,
+        pair_ids,
+    )
+
+
+def test_load_prompt_hashes_the_file_bytes(tmp_path: Path) -> None:
+    """The prompt sha256 is the sha256 of the file bytes, the value sha256sum prints."""
+    prompt_path = write_prompt_file(tmp_path, CHAT_PROMPT)
+    prompt = llm.load_prompt(prompt_path)
+    assert prompt.sha256 == hashlib.sha256(prompt_path.read_bytes()).hexdigest()
+    assert prompt.messages == CHAT_PROMPT["messages"]
+
+
+@pytest.mark.parametrize(
+    "user_content",
+    ["Only {text1} here", "{text1} {text2} {text2}"],
+)
+def test_load_prompt_rejects_a_missing_or_repeated_placeholder(
+    tmp_path: Path,
+    user_content: str,
+) -> None:
+    """Each of {text1} and {text2} has to occur exactly once."""
+    content = {"messages": [{"role": "user", "content": user_content}]}
+    prompt_path = write_prompt_file(tmp_path, content)
+    with pytest.raises(ValueError, match="not once"):
+        llm.load_prompt(prompt_path)
+
+
+def test_load_prompt_rejects_an_unknown_role(tmp_path: Path) -> None:
+    """Only the roles system, user and assistant exist."""
+    content = {"messages": [{"role": "narrator", "content": "{text1} {text2}"}]}
+    prompt_path = write_prompt_file(tmp_path, content)
+    with pytest.raises(ValueError, match="Unknown"):
+        llm.load_prompt(prompt_path)
+
+
+def test_shipped_prompt_has_the_v1_llama2_wording() -> None:
+    """The prompt file of the runs holds the v1 Llama-2 format text and question unchanged."""
+    prompt_path = PROMPT_DIR / LLAMA2_PROMPT_FILE
+    prompt = llm.load_prompt(prompt_path)
+    expected_messages = [
+        {"role": "system", "content": V1_RESPONSE_FORMAT},
+        {"role": "user", "content": V1_QUESTION + V1_TEXTS},
+    ]
+    assert prompt.messages == expected_messages
+
+
+def test_build_token_ids_fills_each_text_once(chat_builder: llm.PromptBuilder) -> None:
+    """A placeholder inside a text is kept as it is - the inserted texts are not searched again."""
+    text1 = "uses {text2} literally"
+    text2 = "plain"
+    token_ids = chat_builder.build_token_ids(text1, text2)
+    rendered = chat_builder.tokenizer.decode(token_ids)
+    assert (
+        rendered
+        == f"{BOS} <system> Answer in JSON. <user> First uses {{text2}} literally second plain end <assistant>"
+    )
+
+
+def test_build_token_ids_asks_for_the_generation_prompt(
+    chat_builder: llm.PromptBuilder,
+) -> None:
+    """The chat template is applied with add_generation_prompt=True, so the model starts its own turn."""
+    text1 = "one"
+    text2 = "two"
+    chat_builder.build_token_ids(text1, text2)
+    assert chat_builder.tokenizer.chat_calls == [
+        {"template": "fake-template", "add_generation_prompt": True},
+    ]
+
+
+def test_build_token_ids_uses_a_given_chat_template(tmp_path: Path) -> None:
+    """A given template replaces the tokenizer's own, which a tokenizer without one needs."""
+    prompt = llm.load_prompt(write_prompt_file(tmp_path, CHAT_PROMPT))
+    tokenizer = FakeTokenizer(chat_template=None)
+    builder = llm.PromptBuilder(
+        tokenizer=tokenizer,
+        prompt=prompt,
+        chat_template="given-template",
+    )
+    text1 = "one"
+    text2 = "two"
+    builder.build_token_ids(text1, text2)
+    assert tokenizer.chat_calls[0]["template"] == "given-template"
+
+
+def test_build_token_ids_truncates_both_texts(tmp_path: Path) -> None:
+    """With a token limit each of the two texts is cut before it goes into the prompt."""
+    prompt = llm.load_prompt(write_prompt_file(tmp_path, CHAT_PROMPT))
+    builder = llm.PromptBuilder(
+        tokenizer=FakeTokenizer(),
+        prompt=prompt,
+        text_token_limit=1,
+    )
+    text1 = "one two"
+    text2 = "three four"
+    token_ids = builder.build_token_ids(text1, text2)
+    rendered = builder.tokenizer.decode(token_ids)
+    assert (
+        rendered
+        == f"{BOS} <system> Answer in JSON. <user> First one second three end <assistant>"
+    )
+
+
+def test_truncate_text_keeps_the_first_tokens_and_strips() -> None:
+    """A limit keeps the first max_tokens tokens, decoded without special tokens and stripped."""
+    tokenizer = FakeTokenizer(decode_prefix=" ")
+    text = f"  one {BOS} two three four  "
+    max_tokens = 3
+    assert llm.truncate_text(tokenizer, text, max_tokens) == "one two"
+
+
+def test_truncate_text_without_a_limit_keeps_the_text() -> None:
+    """Without a limit the text is passed on unchanged, surrounding whitespace included."""
+    tokenizer = FakeTokenizer()
+    text = "  one two three  "
+    max_tokens = None
+    assert llm.truncate_text(tokenizer, text, max_tokens) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_pred"),
+    [
+        (JSON_TRUE, llm.SAME_AUTHOR),
+        (JSON_FALSE, llm.DIFFERENT_AUTHOR),
+        ('{"analysis": "x", "answer": True}', llm.SAME_AUTHOR),
+        ('{"answer":"False"}', llm.DIFFERENT_AUTHOR),
+        ('```json\n{"analysis": "x", "answer": false}\n```', llm.DIFFERENT_AUTHOR),
+        ('{"analysis": "x", "answer" : true}', llm.SAME_AUTHOR),
+        ('{\n  "analysis": "x",\n  "answer": false.\n}', llm.DIFFERENT_AUTHOR),
+        ('"answer": true\nThe texts share many phrases.', llm.SAME_AUTHOR),
+    ],
+)
+def test_parse_answer_reads_the_answer_value(text: str, expected_pred: int) -> None:
+    """A JSON or Python boolean of the answer key, quoted or not, up to the end of the value."""
+    parsed = llm.parse_answer(text)
+    assert parsed == llm.ParsedAnswer(pred=expected_pred, status=llm.ANSWERED)
