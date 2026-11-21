@@ -15,7 +15,6 @@ import math
 import os
 import re
 import time
-from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -412,7 +411,6 @@ def split_chunks(pair_ids: Sequence[str], chunk_size: int) -> list[list[str]]:
         raise ValueError(f"chunk_size has to be at least 1, not {chunk_size}.")
     if not pair_ids:
         raise ValueError("There are no pair ids to split.")
-    repeated = []
     seen_ids = set()
     for pair_id in pair_ids:
         if pair_id in seen_ids:
