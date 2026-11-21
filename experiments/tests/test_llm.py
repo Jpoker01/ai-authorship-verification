@@ -500,6 +500,57 @@ def test_describe_run_changes_with_each_setting(
         "chunk_size": {"chunk_size": 3},
         "pair_order": {"pair_ids": ["c", "b", "a"]},
     }
+    argument_name, new_value = changes[changed_setting]
+    changed_settings = dict(settings)
+    changed_settings[argument_name] = new_value
     description = llm.describe_run(**settings)
-    changed = llm.describe_run(**{**settings, **changes[changed_setting]})
+    changed = llm.describe_run(**changed_settings)
     assert changed != description
+
+
+class TimedTokenizer(FakeTokenizer):
+    """Fake tokenizer whose chat template takes one second of a fake clock."""
+
+    def __init__(self, clock: dict[str, float]) -> None:
+        super().__init__()
+        self.clock = clock
+
+    def apply_chat_template(
+        self,
+        conversation: list[dict[str, str]],
+        chat_template: str | None = None,
+        add_generation_prompt: bool = False,
+        tokenize: bool = True,
+        return_dict: bool = True,
+    ) -> list[int] | dict[str, list[int]] | str:
+        self.clock["now"] += 1.0
+        return super().apply_chat_template(
+            conversation,
+            chat_template=chat_template,
+            add_generation_prompt=add_generation_prompt,
+            tokenize=tokenize,
+            return_dict=return_dict,
+        )
+
+
+class TimedEngine(FakeEngine):
+    """Fake engine whose generate call takes ten seconds of a fake clock."""
+
+    def __init__(
+        self,
+        answers: dict[str, str],
+        tokenizer: FakeTokenizer,
+        clock: dict[str, float],
+    ) -> None:
+        super().__init__(answers, tokenizer)
+        self.clock = clock
+
+    def generate(
+        self,
+        prompts: list[dict[str, list[int]]],
+        sampling_params: object,
+        *,
+        use_tqdm: bool,
+    ) -> list:
+        self.clock["now"] += 10.0
+        return super().generate(prompts, sampling_params, use_tqdm=use_tqdm)
