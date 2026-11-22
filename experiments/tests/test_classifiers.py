@@ -128,6 +128,72 @@ def test_classifier_tables_name_the_same_six_classifiers() -> None:
     assert classifiers.DECISION_FUNCTION_CLASSIFIERS == ["linear_svc"]
 
 
+def test_search_spaces_suggest_the_params_in_a_fixed_order() -> None:
+    """The params are suggested in a fixed order - the seeded sampler depends on it."""
+    expected_order = {
+        "multinomial_naive_bayes": ["alpha"],
+        "logistic_regression": ["C", "penalty"],
+        "linear_svc": ["C", "loss", "class_weight"],
+        "k-nearest_neighbors": ["n_neighbors", "weights", "metric"],
+        "random_forest": [
+            "n_estimators",
+            "max_depth",
+            "min_samples_split",
+            "min_samples_leaf",
+        ],
+        "xgboost": [
+            "eta",
+            "max_depth",
+            "subsample",
+            "colsample_bytree",
+            "reg_lambda",
+            "reg_alpha",
+        ],
+    }
+
+    for classifier_name, names in expected_order.items():
+        assert list(CLASSIFIER_SEARCH_SPACES[classifier_name]) == names
+
+
+def test_search_spaces_are_the_agreed_spaces() -> None:
+    """Every searched hyperparameter has the agreed kind, range or choices."""
+    expected = {
+        "multinomial_naive_bayes": {
+            "alpha": ("float_log", 1e-3, 1.0),
+        },
+        "logistic_regression": {
+            "C": ("float_log", 0.01, 1_000.0),
+            "penalty": ("categorical", "l1", "l2"),
+        },
+        "linear_svc": {
+            "C": ("float_log", 0.01, 1_000.0),
+            "loss": ("categorical", "hinge", "squared_hinge"),
+            "class_weight": ("categorical", None, "balanced"),
+        },
+        "k-nearest_neighbors": {
+            "n_neighbors": ("int", 1, 50),
+            "weights": ("categorical", "uniform", "distance"),
+            "metric": ("categorical", "euclidean", "manhattan", "cosine"),
+        },
+        "random_forest": {
+            "n_estimators": ("int", 100, 600),
+            "max_depth": ("int", 5, 50),
+            "min_samples_split": ("int", 2, 20),
+            "min_samples_leaf": ("int", 1, 10),
+        },
+        "xgboost": {
+            "eta": ("float", 0.01, 0.3),
+            "max_depth": ("int", 3, 12),
+            "subsample": ("float", 0.5, 1.0),
+            "colsample_bytree": ("float", 0.5, 1.0),
+            "reg_lambda": ("float_log", 1e-3, 10.0),
+            "reg_alpha": ("float_log", 1e-3, 1.0),
+        },
+    }
+
+    assert CLASSIFIER_SEARCH_SPACES == expected
+
+
 def test_fixed_params_are_the_agreed_params() -> None:
     """The fixed params - seeds of the four random classifiers, liblinear, dual="auto", no n_jobs."""
     expected = {
@@ -381,3 +447,187 @@ def test_predict_pairs_keeps_the_decision_of_predict_on_a_knn_tie() -> None:
 
     assert predictions.score.tolist() == [0.5]
     assert predictions.pred.tolist() == [0]
+
+
+@pytest.mark.parametrize("metric", ["euclidean", "manhattan", "cosine"])
+def test_predict_pairs_gives_knn_results_independent_of_the_thread_count(
+    metric: str,
+) -> None:
+    """Tied neighbour distances are broken the same way with 1 and 2 OpenMP threads."""
+    fit_data = _pairs_data(n_pairs=2_500, seed=2)
+    target_data = _pairs_data(n_pairs=1_500, seed=3)
+    classifier_name = "k-nearest_neighbors"
+    params = {"n_neighbors": 4, "weights": "uniform", "metric": metric}
+    predictions_by_threads = {}
+
+    for threads in (1, 2):
+        with threadpool_limits(limits=threads, user_api="openmp"):
+            classifier = build_classifier(classifier_name, params, n_jobs=threads)
+            classifier.fit(fit_data.features, fit_data.labels)
+            predictions_by_threads[threads] = predict_pairs(
+                classifier,
+                classifier_name,
+                target_data.features,
+            )
+
+    one_thread = predictions_by_threads[1]
+    two_threads = predictions_by_threads[2]
+    assert np.array_equal(one_thread.pred, two_threads.pred)
+    assert np.array_equal(one_thread.score, two_threads.score)
+
+
+@pytest.mark.parametrize("classifier_name", CLASSIFIER_NAMES)
+def test_predict_pairs_gives_the_same_scores_in_two_runs_with_two_threads(
+    classifier_name: str,
+    pairs_data: PairsData,
+) -> None:
+    """Two fits with the same params and two threads give the same decisions and scores."""
+    features = pairs_data.features
+    labels = pairs_data.labels
+    n_jobs = 2
+
+    first_classifier = _fitted(classifier_name, features, labels, n_jobs)
+    second_classifier = _fitted(classifier_name, features, labels, n_jobs)
+
+    first = predict_pairs(first_classifier, classifier_name, features)
+    second = predict_pairs(second_classifier, classifier_name, features)
+
+    assert np.array_equal(first.pred, second.pred)
+    assert np.array_equal(first.score, second.score)
+
+
+def test_predict_pairs_predicts_a_forest_with_one_thread(
+    pairs_data: PairsData,
+) -> None:
+    """A forest fitted with threads predicts with one, so its votes add up in one order."""
+    features = pairs_data.features
+    labels = pairs_data.labels
+    classifier_name = "random_forest"
+    n_jobs = 2
+    forest = _fitted(classifier_name, features, labels, n_jobs)
+
+    predict_pairs(forest, classifier_name, features)
+
+    assert forest.get_params()["n_jobs"] == 1
+
+
+@pytest.mark.parametrize(
+    "classifier_name",
+    ["linear_svc", "logistic_regression", "random_forest"],
+)
+def test_predict_pairs_works_through_a_pipeline_with_a_scaler(
+    classifier_name: str,
+    pairs_data: PairsData,
+) -> None:
+    """The decision and the score come from the whole pipeline (scaled features)."""
+    features = pairs_data.features
+    labels = pairs_data.labels
+    scaler = StandardScaler(with_mean=False)
+    params = _low_params(classifier_name)
+    n_jobs = 2
+    pipeline = build_classifier(classifier_name, params, n_jobs=n_jobs, scaler=scaler)
+    pipeline.fit(features, labels)
+
+    predictions = predict_pairs(pipeline, classifier_name, features)
+
+    # read after predict_pairs, which leaves a forest with one thread, so both sums match
+    expected_score = getattr(pipeline, SCORE_METHODS[classifier_name])(features)
+    if expected_score.ndim == 2:
+        expected_score = expected_score[:, 1]
+    assert np.array_equal(predictions.pred, pipeline.predict(features).astype(int))
+    assert np.array_equal(predictions.score, expected_score)
+
+
+def test_predict_pairs_refuses_labels_other_than_0_and_1(
+    pairs_data: PairsData,
+) -> None:
+    """A classifier fitted on other labels would make column 1 of the probabilities wrong."""
+    features = pairs_data.features
+    labels = pairs_data.labels
+    classifier_name = "logistic_regression"
+    other_labels = labels.astype(int) + 1
+    classifier = _fitted(classifier_name, features, other_labels)
+
+    with pytest.raises(ValueError, match="not \\[0, 1\\]"):
+        predict_pairs(classifier, classifier_name, features)
+
+
+def test_build_prediction_table_holds_one_row_per_pair() -> None:
+    """id, same (as 0 / 1), score and pred of every pair, in the order of the pairs."""
+    pairs_df = pd.DataFrame({"id": ["007", "a"], "same": [True, False]})
+    predictions = PairPredictions(score=np.array([0.9, -0.2]), pred=np.array([0, 0]))
+    expected_df = pd.DataFrame(
+        {
+            "id": ["007", "a"],
+            "same": [1, 0],
+            "score": [0.9, -0.2],
+            "pred": [0, 0],
+        },
+    )
+
+    table_df = build_prediction_table(pairs_df, predictions)
+
+    pd.testing.assert_frame_equal(table_df, expected_df)
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("repeated id", "repeated id"),
+        ("one score missing", "2 scores and 3 decisions for 3 pairs"),
+        ("one decision missing", "3 scores and 2 decisions for 3 pairs"),
+        ("NaN score", "NaN"),
+    ],
+)
+def test_build_prediction_table_refuses_wrong_predictions(
+    case: str,
+    message: str,
+) -> None:
+    """Repeated ids, a missing prediction or a NaN score never reach the table."""
+    pairs_df = pd.DataFrame({"id": ["a", "b", "c"], "same": [True, False, True]})
+    score = np.array([0.1, 0.2, 0.3])
+    pred = np.array([0, 0, 1])
+    if case == "repeated id":
+        pairs_df.loc[2, "id"] = "a"
+    elif case == "one score missing":
+        score = score[:2]
+    elif case == "one decision missing":
+        pred = pred[:2]
+    elif case == "NaN score":
+        score[1] = np.nan
+    predictions = PairPredictions(score=score, pred=pred)
+
+    with pytest.raises(ValueError, match=message):
+        build_prediction_table(pairs_df, predictions)
+
+
+def test_prediction_table_is_accepted_by_write_run_files(
+    pairs_data: PairsData,
+    tmp_path: Path,
+) -> None:
+    """A table of real predictions is written by tracking.write_run_files as predictions-test."""
+    features = pairs_data.features
+    labels = pairs_data.labels
+    classifier_name = "xgboost"
+    classifier = _fitted(classifier_name, features, labels)
+    pair_ids = []
+    for pair_number in range(len(labels)):
+        pair_ids.append(f"p{pair_number}")
+    pairs_df = pd.DataFrame({"id": pair_ids, "same": labels})
+    predictions = predict_pairs(classifier, classifier_name, features)
+    table_df = build_prediction_table(pairs_df, predictions)
+    context = tracking.RunContext(environment={"commit": "a" * 40}, packages={})
+    run_dir = tmp_path / "run_v2"
+
+    tracking.write_run_files(
+        run_dir,
+        context=context,
+        params={},
+        metrics={},
+        tables={"predictions-test": table_df},
+        figures={},
+    )
+
+    manifest_text = (run_dir / tracking.MANIFEST_FILE).read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    assert "predictions-test.csv" in manifest["files"]
