@@ -12,9 +12,15 @@ from optuna.distributions import (
     FloatDistribution,
     IntDistribution,
 )
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import LinearSVC
 from threadpoolctl import threadpool_limits
+from xgboost import XGBClassifier
 
 from avcore import classifiers, runs, tracking
 from avcore.classifiers import (
@@ -126,6 +132,20 @@ def test_classifier_tables_name_the_same_six_classifiers() -> None:
         "xgboost",
     ]
     assert classifiers.DECISION_FUNCTION_CLASSIFIERS == ["linear_svc"]
+
+
+def test_classifier_classes_are_the_agreed_classes() -> None:
+    """Every name builds the scikit-learn or XGBoost class the thesis names."""
+    expected_classes = {
+        "multinomial_naive_bayes": MultinomialNB,
+        "logistic_regression": LogisticRegression,
+        "linear_svc": LinearSVC,
+        "k-nearest_neighbors": KNeighborsClassifier,
+        "random_forest": RandomForestClassifier,
+        "xgboost": XGBClassifier,
+    }
+
+    assert classifiers.CLASSIFIER_CLASSES == expected_classes
 
 
 def test_search_spaces_suggest_the_params_in_a_fixed_order() -> None:
@@ -496,18 +516,30 @@ def test_predict_pairs_gives_the_same_scores_in_two_runs_with_two_threads(
     assert np.array_equal(first.score, second.score)
 
 
+@pytest.mark.parametrize(
+    "scaler",
+    [None, StandardScaler(with_mean=False)],
+    ids=["alone", "in_a_pipeline"],
+)
 def test_predict_pairs_predicts_a_forest_with_one_thread(
+    scaler: StandardScaler | None,
     pairs_data: PairsData,
 ) -> None:
-    """A forest fitted with threads predicts with one, so its votes add up in one order."""
+    """A forest fitted with threads predicts with one, also inside a pipeline."""
     features = pairs_data.features
     labels = pairs_data.labels
     classifier_name = "random_forest"
+    params = _low_params(classifier_name)
     n_jobs = 2
-    forest = _fitted(classifier_name, features, labels, n_jobs)
+    classifier = build_classifier(classifier_name, params, n_jobs=n_jobs, scaler=scaler)
+    classifier.fit(features, labels)
 
-    predict_pairs(forest, classifier_name, features)
+    predict_pairs(classifier, classifier_name, features)
 
+    if scaler is None:
+        forest = classifier
+    else:
+        forest = classifier.named_steps["classifier"]
     assert forest.get_params()["n_jobs"] == 1
 
 
@@ -540,6 +572,19 @@ def test_predict_pairs_predicts_with_the_whole_pipeline(
         pipeline_score = pipeline.predict_proba(features)[:, same_author_column]
     assert np.array_equal(predictions.pred, pipeline_pred)
     assert np.array_equal(predictions.score, pipeline_score)
+
+
+def test_predict_pairs_rejects_an_unknown_classifier(
+    pairs_data: PairsData,
+) -> None:
+    """A name that is not in CLASSIFIER_NAMES is refused."""
+    features = pairs_data.features
+    labels = pairs_data.labels
+    classifier = _fitted("logistic_regression", features, labels)
+    classifier_name = "logistic"
+
+    with pytest.raises(ValueError, match="Unknown classifier 'logistic'"):
+        predict_pairs(classifier, classifier_name, features)
 
 
 def test_predict_pairs_refuses_labels_other_than_0_and_1(
