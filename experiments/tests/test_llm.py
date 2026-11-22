@@ -425,6 +425,7 @@ def test_parse_answer_reads_the_answer_value(text: str, expected_pred: int) -> N
         '{"analysis": "x", "non_answer": true}',
         "Answer: The texts were written by the same author.",
         "Answers: true",
+        "Answer: **True**",
     ],
 )
 def test_parse_answer_without_a_boolean_answer_value_is_unanswered(text: str) -> None:
@@ -443,6 +444,13 @@ def test_parse_answer_with_agreeing_values_is_answered() -> None:
 def test_parse_answer_with_both_values_is_unanswered() -> None:
     """Two different answer values are not an answer."""
     text = f"{JSON_TRUE} or maybe {JSON_FALSE}"
+    parsed = llm.parse_answer(text)
+    assert parsed == llm.ParsedAnswer(pred=None, status=llm.CONFLICTING_ANSWERS)
+
+
+def test_parse_answer_with_a_key_phrase_in_the_analysis_is_unanswered() -> None:
+    """A key followed by a boolean inside the analysis counts too, so a different value conflicts."""
+    text = '{"analysis": "One might think the answer: false. Yet the style matches.", "answer": true}'
     parsed = llm.parse_answer(text)
     assert parsed == llm.ParsedAnswer(pred=None, status=llm.CONFLICTING_ANSWERS)
 

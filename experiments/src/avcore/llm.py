@@ -566,7 +566,9 @@ def generate_answers(
 
 
 def parse_answer(text: str) -> ParsedAnswer:
-    """Read the answer of a generated text - only the value of its "answer" key counts.
+    """Read the answer of a generated text - only the value of the answer key counts.
+
+    The key may be in any letter case, with or without double quotes or markdown bold around it.
 
     Args:
         text: The generated text alone, without the prompt.

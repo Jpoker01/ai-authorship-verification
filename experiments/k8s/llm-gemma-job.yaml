@@ -166,7 +166,7 @@ spec:
           resources:
             requests:
               cpu: "4"
-              memory: 64Gi          # as the A40 check - the 70B GPTQ shards are read through the page cache
+              memory: 64Gi          # as the A40 check - the 31 GiB of Granite's FP8 shards are read through the page cache
               nvidia.com/gpu: 1
             limits:
               cpu: "4"
