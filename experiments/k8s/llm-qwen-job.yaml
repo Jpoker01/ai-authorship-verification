@@ -167,6 +167,7 @@ spec:
             requests:
               cpu: "4"
               memory: 64Gi          # as the A40 check - the 70B GPTQ shards are read through the page cache              nvidia.com/gpu: 1
+              nvidia.com/gpu: 1
             limits:
               cpu: "4"
               memory: 64Gi          # = the request (Guaranteed)
