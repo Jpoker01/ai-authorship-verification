@@ -7,7 +7,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llm-qwen
+  name: llm-gemma
   labels:
     app: dt-v2
     family: llm
