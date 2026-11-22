@@ -15,7 +15,7 @@ import math
 import os
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -58,6 +58,9 @@ GENERATION_COLUMNS = [
     "status",
 ]
 UNANSWERED_COLUMNS = ["id", "status", "finish_reason"]
+# strings of the prompt templates (Llama-2 chat tags, the delimiter of the texts) - a text that
+# holds one could close the delimiter or open a new turn inside the prompt
+TEMPLATE_STRINGS = ("[INST]", "[/INST]", "<<SYS>>", "<</SYS>>", "```")
 
 
 @dataclass(frozen=True)
@@ -158,7 +161,7 @@ def _check_placeholders(templates: Sequence[str]) -> None:
     for placeholder in TEXT_PLACEHOLDERS:
         if found.count(placeholder) != 1:
             raise ValueError(
-                f"The prompt has {placeholder} {found.count(placeholder)} times, not once."
+                f"The prompt has {placeholder} {found.count(placeholder)} times, not once.",
             )
 
 
@@ -210,7 +213,10 @@ def truncate_text(tokenizer: Any, text: str, max_tokens: int | None) -> str:
     if max_tokens is None:
         return text
     encoding = tokenizer(
-        text, truncation=True, max_length=max_tokens, add_special_tokens=False
+        text,
+        truncation=True,
+        max_length=max_tokens,
+        add_special_tokens=False,
     )
     return tokenizer.decode(encoding["input_ids"], skip_special_tokens=True).strip()
 
@@ -291,7 +297,7 @@ def check_prompt_lengths(prompt_tokens: pd.Series, max_model_len: int) -> None:
     if not too_long.empty:
         raise ValueError(
             f"{len(too_long)} prompts leave no room for an answer in {max_model_len} tokens, "
-            f"the longest has {too_long.max()} tokens (pair {too_long.idxmax()})."
+            f"the longest has {too_long.max()} tokens (pair {too_long.idxmax()}).",
         )
 
 
@@ -364,7 +370,8 @@ def _chunk_path(answers_dir: Path, index: int) -> Path:
 
 
 def prepare_answers_dir(
-    answers_dir: Path, run_description: Mapping[str, object]
+    answers_dir: Path,
+    run_description: Mapping[str, object],
 ) -> None:
     """Create the answers folder of a run, or check that an existing one belongs to this run.
 
@@ -390,12 +397,12 @@ def prepare_answers_dir(
         if changes:
             raise RuntimeError(
                 f"{answers_dir} holds the answers of other settings - {'; '.join(changes)}. "
-                "Move it away or restore the settings."
+                "Move it away or restore the settings.",
             )
     elif find_finished_chunks(answers_dir):
         raise RuntimeError(
             f"{answers_dir} holds chunk files but no {RUN_FILE}, so their settings are "
-            "unknown. Move it away."
+            "unknown. Move it away.",
         )
     answers_dir.mkdir(parents=True, exist_ok=True)
     for partial_path in answers_dir.glob(f"*{PARTIAL_SUFFIX}"):
@@ -434,7 +441,9 @@ def split_chunks(pair_ids: Sequence[str], chunk_size: int) -> list[list[str]]:
 
 
 def _answer_record(
-    pair_id: str, prompt_ids: list[int], output: Any
+    pair_id: str,
+    prompt_ids: list[int],
+    output: Any,
 ) -> dict[str, object]:
     """Return what is kept of one request output.
 
@@ -451,7 +460,7 @@ def _answer_record(
     """
     if list(output.prompt_token_ids) != prompt_ids:
         raise RuntimeError(
-            f"The engine returned the answer of another prompt for pair {pair_id}."
+            f"The engine returned the answer of another prompt for pair {pair_id}.",
         )
     completion = output.outputs[0]
     return {
@@ -509,7 +518,7 @@ def generate_answers(
         seconds = time.monotonic() - start
         if len(outputs) != len(chunk_ids):
             raise RuntimeError(
-                f"Chunk {index}: {len(outputs)} outputs for {len(chunk_ids)} prompts."
+                f"Chunk {index}: {len(outputs)} outputs for {len(chunk_ids)} prompts.",
             )
         records = []
         for pair_id, ids, output in zip(chunk_ids, prompt_ids, outputs, strict=True):
@@ -520,7 +529,7 @@ def generate_answers(
         )
         generated += 1
         logger.info(
-            f"Chunk {index + 1} of {len(chunks)} - {len(chunk_ids)} answers in {seconds:.1f} s."
+            f"Chunk {index + 1} of {len(chunks)} - {len(chunk_ids)} answers in {seconds:.1f} s.",
         )
     return generated
 
@@ -547,7 +556,9 @@ def parse_answer(text: str) -> ParsedAnswer:
 
 
 def read_answers(
-    answers_dir: Path, pair_ids: Sequence[str], chunk_size: int
+    answers_dir: Path,
+    pair_ids: Sequence[str],
+    chunk_size: int,
 ) -> GeneratedAnswers:
     """Read every chunk file of a finished generation and parse its answers.
 
@@ -582,7 +593,8 @@ def read_answers(
     answers_df["pred"] = pd.array([answer.pred for answer in parsed], dtype="Int64")
     answers_df["status"] = [answer.status for answer in parsed]
     return GeneratedAnswers(
-        answers_df=answers_df, generation_seconds=generation_seconds
+        answers_df=answers_df,
+        generation_seconds=generation_seconds,
     )
 
 
@@ -613,7 +625,7 @@ def build_prediction_tables(
         raise ValueError(f"Unanswered pairs need a 0 / 1 pred, not {unanswered_pred}.")
     if not math.isfinite(unanswered_score):
         raise ValueError(
-            f"Unanswered pairs need a finite score, not {unanswered_score}."
+            f"Unanswered pairs need a finite score, not {unanswered_score}.",
         )
     answered = (answers_df["status"] == ANSWERED).to_numpy()
     pred = answers_df["pred"].fillna(unanswered_pred).astype(int).to_numpy()
@@ -625,7 +637,7 @@ def build_prediction_tables(
             "same": pairs_df["same"].astype(int).to_numpy(),
             "score": score,
             "pred": pred,
-        }
+        },
     )
     unanswered_df = answers_df.loc[~answered, UNANSWERED_COLUMNS].reset_index(drop=True)
     generation_df = answers_df[GENERATION_COLUMNS].reset_index(drop=True)

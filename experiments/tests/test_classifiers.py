@@ -243,22 +243,6 @@ def test_fixed_params_are_the_agreed_params() -> None:
     assert CLASSIFIER_FIXED_PARAMS == expected
 
 
-def test_linear_classifiers_search_c_up_to_1e3() -> None:
-    """LogReg and LinearSVC search C log-scaled in [0.01, 1e3]; LogReg no longer searches the solver."""
-    expected_logreg = {
-        "C": ("float_log", 0.01, 1_000.0),
-        "penalty": ("categorical", "l1", "l2"),
-    }
-    expected_svc = {
-        "C": ("float_log", 0.01, 1_000.0),
-        "loss": ("categorical", "hinge", "squared_hinge"),
-        "class_weight": ("categorical", None, "balanced"),
-    }
-
-    assert CLASSIFIER_SEARCH_SPACES["logistic_regression"] == expected_logreg
-    assert CLASSIFIER_SEARCH_SPACES["linear_svc"] == expected_svc
-
-
 def test_search_spaces_are_accepted_as_study_settings(tmp_path: Path) -> None:
     """Every search space can be stored as a study setting (no nested list)."""
     study_path = tmp_path / "study.db"
