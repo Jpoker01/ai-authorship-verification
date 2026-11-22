@@ -67,18 +67,22 @@ spec:
               value: v2-launch-2-llm
             - name: NOTEBOOK
               value: llm_classification.ipynb
-            - name: SMOKE         # papermill SMOKE
-              value: "False"
-            - name: N_TRIALS      # papermill N_TRIALS - "" is not passed
-              value: "30"
+            - name: MODEL_ID      # papermill MODEL_ID - a key of the model table of the notebook
+              value: Qwen/Qwen3-4B-Instruct-2507
+            - name: MODE          # papermill MODE - test; pilot / smoke only in the copies outside the repo
+              value: test
             - name: SEED          # papermill SEED - "" is not passed
               value: "42"
-            - name: MODEL_ID      # papermill MODEL_ID - "" is not passed (the head notebooks keep their own)
+            - name: RUN_TAG       # papermill RUN_TAG - "" is not passed
               value: ""
-            - name: RUN_TAG       # papermill RUN_TAG - "" is not passed; g1 / g2 in the smoke Jobs
+            - name: MAX_TOKENS    # papermill MAX_TOKENS - MUST stay "" in a test run (the model table decides)
               value: ""
-            - name: MIN_FREE_GB   # two checkpoints during a save (2 x 1,79 GB) + the saved model + reserve
-              value: "6"
+            - name: PILOT_PAIRS_SHA256  # MUST stay "" in a test run; the pilot / smoke copies pin the pilot files
+              value: ""
+            - name: PILOT_TRUTH_SHA256
+              value: ""
+            - name: MIN_FREE_GB   # the answer chunks and the result tables (tens of MB) + reserve
+              value: "2"
             - name: SAMPLE_SECONDS  # period of the memory log (anon, shmem, dirty pages, OOM kills, GPU memory)
               value: "60"
           command: ["bash", "-c"]
@@ -102,8 +106,9 @@ spec:
               '
               expected_data='
               import json, sys
-              for name, sha256 in sorted(json.load(open(sys.argv[1]))["cleaned_sha256"].items()):
-                  print(sha256, name)
+              for name, sha256 in sorted(json.load(open(sys.argv[1]))["raw_sha256"].items()):
+                  if name.startswith(sys.argv[2]):
+                      print(sha256, name)
               '
               venv_list='
               import importlib.metadata
@@ -114,7 +119,7 @@ spec:
               echo "cpu.max=[$(cat /sys/fs/cgroup/cpu.max)] memory.max=[$(cat /sys/fs/cgroup/memory.max)]"
               export LD_LIBRARY_PATH="$(printf '%s' "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -vx /opt/conda/lib | paste -sd: -)"
               echo "LD_LIBRARY_PATH=[$LD_LIBRARY_PATH]"
-              echo "params SMOKE=[$SMOKE] N_TRIALS=[$N_TRIALS] SEED=[$SEED] MODEL_ID=[$MODEL_ID] RUN_TAG=[$RUN_TAG] NOTEBOOK=[$NOTEBOOK]"
+              echo "params MODEL_ID=[$MODEL_ID] MODE=[$MODE] SEED=[$SEED] RUN_TAG=[$RUN_TAG] MAX_TOKENS=[$MAX_TOKENS] NOTEBOOK=[$NOTEBOOK]"
               cd "$repo/experiments" || refuse "the repository is missing"
               status="$(git status --porcelain --untracked-files=all)" || refuse "git status failed"
               status="$(printf '%s' "$status" | tr '\n' ' ')"
@@ -127,13 +132,22 @@ spec:
               frozen_bad="$(sha256sum --check --quiet frozen_files.sha256 2>&1)"
               frozen_exit=$?
               echo "frozen=$(grep -c '^[0-9a-f]' frozen_files.sha256) entries, exit=$frozen_exit, list=$(sha256sum frozen_files.sha256 | cut -c1-64) bad=[$frozen_bad]"
-              data_expected="$("$venv/bin/python" -c "$expected_data" results/v2/dataset_preprocessing/dataset_preprocessing_facts.json)"
-              data_actual="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && sha256sum "data/processed/$name" | awk -v name="$name" '{print $1, name}'; done)"
+              if [ "$MODE" = "test" ]; then
+                  # the PAN 2021 test files against their sha256 in the facts file
+                  data_dir=data/raw
+                  data_expected="$("$venv/bin/python" -c "$expected_data" results/v2/dataset_preprocessing/dataset_preprocessing_facts.json pan21-)"
+              else
+                  # the pilot files against the sha256 pinned in the Job copy
+                  [ -n "$PILOT_PAIRS_SHA256" ] && [ -n "$PILOT_TRUTH_SHA256" ] || refuse "the pilot sha256 values are not set"
+                  data_dir=data/processed
+                  data_expected="$(printf '%s %s\n%s %s' "$PILOT_PAIRS_SHA256" pan20-llm-pilot-pairs.jsonl "$PILOT_TRUTH_SHA256" pan20-llm-pilot-truth.jsonl)"
+              fi
+              data_actual="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && sha256sum "$data_dir/$name" | awk -v name="$name" '{print $1, name}'; done)"
               echo "$data_actual"
               if [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ]; then echo "data=MATCH"; else echo "data=DIFFERENT"; fi
-              data_missing="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && [ ! -f "data/processed/$name" ] && echo "$name"; done | tr '\n' ' ')"
-              [ -z "$data_missing" ] || refuse "a cleaned data file is missing: $data_missing"
-                            [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ] || refuse "the cleaned data differs from the facts file"
+                            data_missing="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && [ ! -f "$data_dir/$name" ] && echo "$name"; done | tr '\n' ' ')"
+              [ -z "$data_missing" ] || refuse "a data file is missing: $data_missing"
+                            [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ] || refuse "the data files differ from their expected sha256"
               [ -z "$status" ] || refuse "the repository has uncommitted or untracked files"
               [ "$frozen_exit" -eq 0 ] || refuse "a frozen file differs from frozen_files.sha256"
               if [ -n "$LAUNCH_TAG" ]; then
@@ -145,18 +159,17 @@ spec:
               kernel_dir="$("$venv/bin/jupyter" kernelspec list | awk '$1 == "python3" {print $2}')"
               [ "$kernel_dir" = "$venv/share/jupyter/kernels/python3" ] || refuse "the kernel python3 is not the one of the venv: [$kernel_dir]"
               timeout 1800 "$venv/bin/python" -c "$gpu_check" || exit 65
-              cd notebooks/transformer || refuse "the notebook folder is missing"
+              cd notebooks/llm || refuse "the notebook folder is missing"
               while :; do echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(awk '$1 == "anon" || $1 == "shmem" || $1 == "file_dirty" {printf "%s=%s ", $1, $2}' /sys/fs/cgroup/memory.stat)oom_kill=$(awk '$1 == "oom_kill" {print $2}' /sys/fs/cgroup/memory.events) gpu_mib=$(timeout 10 nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)"; sleep "$SAMPLE_SECONDS"; done >> "$HOME/logs/$run.memory" 2>&1 &
               echo "papermill started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-              exec "$venv/bin/papermill" "$NOTEBOOK" "$HOME/logs/$run.ipynb" -k python3 --cwd . --log-output --no-progress-bar --start-timeout 600 -p SMOKE "$SMOKE" ${N_TRIALS:+-p N_TRIALS "$N_TRIALS"} ${SEED:+-p SEED "$SEED"} ${MODEL_ID:+-r MODEL_ID "$MODEL_ID"} ${RUN_TAG:+-r RUN_TAG "$RUN_TAG"}
+              exec "$venv/bin/papermill" "$NOTEBOOK" "$HOME/logs/$run.ipynb" -k python3 --cwd . --log-output --no-progress-bar --start-timeout 600 -r MODEL_ID "$MODEL_ID" -r MODE "$MODE" ${SEED:+-p SEED "$SEED"} ${RUN_TAG:+-r RUN_TAG "$RUN_TAG"} ${MAX_TOKENS:+-p MAX_TOKENS "$MAX_TOKENS"}
           resources:
             requests:
               cpu: "4"
-              memory: 40Gi          # J2 - S8 accepts only if 1,25 x the peak of anon + shmem + the checkpoint fits
-              nvidia.com/gpu: 1
+              memory: 64Gi          # as the A40 check - the 70B GPTQ shards are read through the page cache              nvidia.com/gpu: 1
             limits:
               cpu: "4"
-              memory: 40Gi          # = the request (Guaranteed)
+              memory: 64Gi          # = the request (Guaranteed)
               nvidia.com/gpu: 1
           volumeMounts:
             - name: home
@@ -167,7 +180,7 @@ spec:
         - name: home
           persistentVolumeClaim:
             claimName: xpokor17-home-jupyter-xpokor17--dt  # the home of dt (matched by its pvc-8a8a6cee volume)
-        - name: dshm              # the default /dev/shm is only 64MB; kept from the smoke Job, the training uses no workers
+        - name: dshm  # the default /dev/shm is only 64MB; 4Gi as in the A40 check of vLLM
           emptyDir:
             medium: Memory
-            sizeLimit: 2Gi
+            sizeLimit: 4Gi
