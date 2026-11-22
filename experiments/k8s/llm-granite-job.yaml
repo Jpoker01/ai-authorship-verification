@@ -1,13 +1,13 @@
-# LLM Job of the llm_classification notebook for TheBloke/Llama-2-70B-chat-GPTQ on CERIT: one A40, the dt
+# LLM Job of the llm_classification notebook for ibm-granite/granite-4.0-h-small-FP8 on CERIT: one A40, the dt
 # home PVC, the launch checkout with its own llm venv and kernel, the model from the Hugging Face cache
 # of dt. A replaced pod runs the notebook from the top again and it resumes at the first missing chunk.
 # Run from a terminal on the dt hub server, in the launch checkout ~/launch/v2-launch-2-llm:
-#   kubectl apply -f experiments/k8s/llm-llama-job.yaml
-#   kubectl get pods -l job-name=llm-llama; tail -f ~/logs/llm-llama-*.log
+#   kubectl apply -f experiments/k8s/llm-granite-job.yaml
+#   kubectl get pods -l job-name=llm-granite; tail -f ~/logs/llm-granite-*.log
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llm-llama
+  name: llm-granite
   labels:
     app: dt-v2
     family: llm
@@ -68,7 +68,7 @@ spec:
             - name: NOTEBOOK
               value: llm_classification.ipynb
             - name: MODEL_ID      # papermill MODEL_ID - a key of the model table of the notebook
-              value: TheBloke/Llama-2-70B-chat-GPTQ
+              value: ibm-granite/granite-4.0-h-small-FP8
             - name: MODE          # papermill MODE - test; pilot / smoke only in the copies outside the repo
               value: test
             - name: SEED          # papermill SEED - "" is not passed
@@ -166,7 +166,7 @@ spec:
           resources:
             requests:
               cpu: "4"
-              memory: 64Gi          # as the A40 check - the 70B GPTQ shards are read through the page cache              nvidia.com/gpu: 1
+              memory: 64Gi          # as the A40 check - the 31 GiB of Granite's FP8 shards are read through the page cache
               nvidia.com/gpu: 1
             limits:
               cpu: "4"

@@ -38,7 +38,11 @@ CONFLICTING_ANSWERS = "conflicting_answers"
 
 _ANSWER_PATTERN = re.compile(
     r"""
-    "answer" \s* : \s*            # the key in double quotes and its colon
+    (?<![\w'])                    # the key starts a word and is not in single quotes
+    "? \**                        # an optional double quote and markdown bold before the key
+    (?i:answer)                   # the key in any letter case - "answer", Answer, ANSWER
+    \** "? \s* \** \s*            # the closing bold and quote, then spaces
+    : \s* \** \s*                 # the colon, and bold after it as in **Answer:** True
     (?P<quote>"?)                 # an optional quote before the value
     (?i:(?P<value>true|false))    # the value in any letter case - JSON or Python boolean
     (?P=quote)                    # the closing quote, only if the value had an opening one

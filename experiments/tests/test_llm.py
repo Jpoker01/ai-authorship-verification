@@ -389,10 +389,18 @@ def test_truncate_text_without_a_limit_keeps_the_text() -> None:
         ('{"analysis": "x", "answer" : true}', llm.SAME_AUTHOR),
         ('{\n  "analysis": "x",\n  "answer": false.\n}', llm.DIFFERENT_AUTHOR),
         ('"answer": true\nThe texts share many phrases.', llm.SAME_AUTHOR),
+        ('{"analysis": "x", "Answer": true}', llm.SAME_AUTHOR),
+        ("Analysis: The texts differ.\nAnswer: False", llm.DIFFERENT_AUTHOR),
+        ("**Answer:** True", llm.SAME_AUTHOR),
+        ('**answer**: "false"', llm.DIFFERENT_AUTHOR),
+        ("ANSWER: false.", llm.DIFFERENT_AUTHOR),
+        ('"**answer**": true', llm.SAME_AUTHOR),
+        ('**"answer"**: false', llm.DIFFERENT_AUTHOR),
+        ("Answer: **True.", llm.SAME_AUTHOR),
     ],
 )
 def test_parse_answer_reads_the_answer_value(text: str, expected_pred: int) -> None:
-    """A JSON or Python boolean of the answer key, quoted or not, up to the end of the value."""
+    """A JSON or Python boolean after the answer key in any letter case, with or without quotes or bold."""
     parsed = llm.parse_answer(text)
     assert parsed == llm.ParsedAnswer(pred=expected_pred, status=llm.ANSWERED)
 
@@ -403,7 +411,6 @@ def test_parse_answer_reads_the_answer_value(text: str, expected_pred: int) -> N
         "",
         "The texts were written by the same author.",
         '{"analysis": "x", "answer": "yes"}',
-        '{"analysis": "x", "Answer": true}',
         '{"analysis": "x", "answer": trueish}',
         '"answer":  A boolean (True/False) answer.',
         '{"analysis": "x", "answer": "True/False"}',
@@ -413,10 +420,15 @@ def test_parse_answer_reads_the_answer_value(text: str, expected_pred: int) -> N
         '"answer": True - the same author.',
         '{"analysis": "x", "answer": "True."}',
         '{"analysis": "x", "answer": "True}',
+        "{'analysis': 'x', 'answer': True}",
+        "'answer: false.",
+        '{"analysis": "x", "non_answer": true}',
+        "Answer: The texts were written by the same author.",
+        "Answers: true",
     ],
 )
 def test_parse_answer_without_a_boolean_answer_value_is_unanswered(text: str) -> None:
-    """Without "answer" followed by a whole boolean the pair has no answer."""
+    """Without the answer key, in double quotes or none, followed by a whole boolean the pair has no answer."""
     parsed = llm.parse_answer(text)
     assert parsed == llm.ParsedAnswer(pred=None, status=llm.NO_ANSWER)
 
