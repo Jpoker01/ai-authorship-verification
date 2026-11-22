@@ -91,12 +91,6 @@ class RecordingTrial:
         return low
 
 
-@pytest.fixture(scope="module")
-def pairs_data() -> PairsData:
-    """60 training pairs."""
-    return _pairs_data(n_pairs=60, seed=1)
-
-
 def _low_params(classifier_name: str) -> dict[str, object]:
     """The low end of every searched hyperparameter (a forest with 10 trees, to be fast)."""
     params = suggest_params(RecordingTrial(), CLASSIFIER_SEARCH_SPACES[classifier_name])
@@ -116,6 +110,12 @@ def _fitted(
     classifier = build_classifier(classifier_name, params, n_jobs=n_jobs)
     classifier.fit(features, labels)
     return classifier
+
+
+@pytest.fixture(scope="module")
+def pairs_data() -> PairsData:
+    """60 training pairs."""
+    return _pairs_data(n_pairs=60, seed=1)
 
 
 def test_classifier_tables_name_the_same_six_classifiers() -> None:

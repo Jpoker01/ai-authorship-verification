@@ -1238,3 +1238,32 @@ def test_real_tokenizer_without_a_template_raises(tmp_path: Path) -> None:
     text2 = "two"
     with pytest.raises(ValueError, match="chat_template"):
         builder.build_token_ids(text1, text2)
+
+
+@pytest.mark.parametrize("template_string", llm.TEMPLATE_STRINGS)
+def test_neutralize_template_strings_replaces_each_string_by_a_space(
+    template_string: str,
+) -> None:
+    """Every template string becomes one space and is counted."""
+    text = f"before {template_string} after"
+    neutralized, count = llm.neutralize_template_strings(text)
+    assert neutralized == "before   after"
+    assert count == 1
+
+
+def test_neutralize_template_strings_keeps_a_text_without_them() -> None:
+    """A text without a template string comes back unchanged, with the count 0."""
+    text = "She said [laughs] and <b>left</b> with `code` and ``quotes``."
+    neutralized, count = llm.neutralize_template_strings(text)
+    assert neutralized == text
+    assert count == 0
+
+
+def test_neutralize_template_strings_keeps_words_apart_and_counts_every_string() -> (
+    None
+):
+    """Every occurrence becomes one space between the words, and every occurrence is counted."""
+    text = "a```b[INST]c<</SYS>>d[INST]e````f"
+    neutralized, count = llm.neutralize_template_strings(text)
+    assert neutralized == "a b c d e `f"
+    assert count == 5
