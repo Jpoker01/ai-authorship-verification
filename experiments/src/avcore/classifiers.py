@@ -91,6 +91,8 @@ CLASSIFIER_FIXED_PARAMS: dict[str, dict[str, object]] = {
     "random_forest": {"random_state": SEED},
     "xgboost": {
         "objective": "binary:logistic",
+        # caps the histogram cache of the tree builder - the same trees with less memory
+        "max_cached_hist_node": 16,
         "eval_metric": "logloss",
         "n_estimators": 300,
         "tree_method": "auto",

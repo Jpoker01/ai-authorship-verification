@@ -237,6 +237,8 @@ def test_fixed_params_are_the_agreed_params() -> None:
             "n_estimators": 300,
             "tree_method": "auto",
             "random_state": 42,
+            # caps the histogram cache of the tree builder - the same trees with less memory
+            "max_cached_hist_node": 16,
         },
     }
 
