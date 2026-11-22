@@ -1,7 +1,7 @@
 """The six classifiers of the pairwise notebooks - their search spaces, fixed params and predictions.
 
 Every pairwise notebook (BoW and TF-IDF, ISG) tunes the same six classifiers with the same
-search spaces. A classifier decides with its own predict, as in v1; its score (probability
+search spaces. A classifier decides with its own predict; its score (probability
 of the same author, or the decision function of LinearSVC) is kept for every pair.
 """
 
@@ -40,7 +40,6 @@ CLASSIFIER_NAMES = list(CLASSIFIER_CLASSES)
 
 # per param: (kind, *arguments), suggested in this order
 # kinds: categorical (flat choices, storable in study settings), int, float, float_log
-# name -> (kind, *arguments), suggested in this order; kind is categorical, int, float or
 CLASSIFIER_SEARCH_SPACES: dict[str, dict[str, tuple]] = {
     "multinomial_naive_bayes": {
         "alpha": ("float_log", 1e-3, 1.0),
@@ -190,8 +189,7 @@ def build_classifier(
 class PairPredictions:
     """Decision and score of a classifier for every pair.
 
-    Decide by pred, not by a threshold on score - a tie (probability 0.5, decision
-    function 0) is a different author.
+    Decide by pred, not by a threshold on score - at a tie the two can disagree.
 
     Attributes:
         score: Probability of the same author, or the LinearSVC decision function.
@@ -208,6 +206,9 @@ def predict_pairs(
     pair_features: sp.csr_matrix,
 ) -> PairPredictions:
     """Return the decision and the score of a fitted classifier for every pair.
+
+    A forest is set to one thread for good, so a later fit of the same object also
+    runs on one thread.
 
     Args:
         classifier: The fitted classifier or pipeline of build_classifier, fitted on the
