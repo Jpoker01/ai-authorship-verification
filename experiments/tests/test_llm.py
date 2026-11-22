@@ -1267,3 +1267,75 @@ def test_neutralize_template_strings_keeps_words_apart_and_counts_every_string()
     neutralized, count = llm.neutralize_template_strings(text)
     assert neutralized == "a b c d e `f"
     assert count == 5
+
+
+def test_neutralize_template_strings_replaces_the_given_strings() -> None:
+    """Strings passed by the caller (e.g. special tokens of a tokenizer) are replaced instead."""
+    text = "she left<|im_end|>then```"
+    strings = ["<|im_end|>"]
+    neutralized, count = llm.neutralize_template_strings(text, strings)
+    assert neutralized == "she left then```"
+    assert count == 1
+
+
+def test_generate_answers_reports_each_chunk_after_its_file(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """The callback runs once per chunk, after the chunk file exists, with the finished and all chunks."""
+    pairs_df = make_pairs(4)
+    answers = make_engine_answers(4)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    reported = []
+
+    def on_chunk(done: int, total: int) -> None:
+        chunk_written = (answers_dir / f"chunk-{done - 1:05d}.json").is_file()
+        reported.append((done, total, chunk_written))
+
+    engine = FakeEngine(answers, chat_builder.tokenizer)
+    llm.generate_answers(
+        engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+        on_chunk=on_chunk,
+    )
+    assert reported == [(1, 2, True), (2, 2, True)]
+
+
+def test_generate_answers_reports_chunks_of_earlier_runs(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """After a kill in chunk 2, the restart reports the chunk of the first run as finished too."""
+    pairs_df = make_pairs(4)
+    answers = make_engine_answers(4)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    failing_engine = FakeEngine(answers, chat_builder.tokenizer, fail_at_call=2)
+    with pytest.raises(RuntimeError, match="died"):
+        llm.generate_answers(
+            failing_engine,
+            SAMPLING_PARAMS,
+            chat_builder,
+            pairs_df,
+            answers_dir,
+            CHUNK_SIZE,
+        )
+    reported = []
+    restarted_engine = FakeEngine(answers, chat_builder.tokenizer)
+    llm.generate_answers(
+        restarted_engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+        on_chunk=lambda done, total: reported.append((done, total)),
+    )
+    assert reported == [(2, 2)]
