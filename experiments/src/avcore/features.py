@@ -75,7 +75,7 @@ class PairFeatures:
             None for features that no vectorizer builds (graph vectors).
     """
 
-    X_fit: tuple[sp.csr_matrix, sp.csr_matrix]
+    fit_sides: tuple[sp.csr_matrix, sp.csr_matrix]
     target_sides: tuple[sp.csr_matrix, sp.csr_matrix]
     fit_pairs_df: pd.DataFrame
     target_pairs_df: pd.DataFrame
@@ -500,7 +500,7 @@ def compute_element_wise_features(
     """Return first * second, feature by feature, for every pair, one row per pair.
 
     Args:
-        X_pair: Features of the first and of the second text of every pair.
+        pair_sides: Features of the first and of the second text of every pair.
 
     Returns:
         The element-wise product of the two feature vectors of every pair.
