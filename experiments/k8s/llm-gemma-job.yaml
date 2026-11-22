@@ -2,7 +2,7 @@
 # home PVC, the launch checkout with its own llm venv and kernel, the model from the Hugging Face cache
 # of dt. A replaced pod runs the notebook from the top again and it resumes at the first missing chunk.
 # Run from a terminal on the dt hub server, in the launch checkout ~/launch/v2-launch-2-llm:
-#   kubectl apply -f experiments/k8s/llm-gemma.yaml
+#   kubectl apply -f experiments/k8s/llm-gemma-job.yaml
 #   kubectl get pods -l job-name=llm-gemma; tail -f ~/logs/llm-gemma-*.log
 apiVersion: batch/v1
 kind: Job
