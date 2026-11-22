@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import optuna
@@ -64,21 +65,28 @@ class RecordingTrial:
         return low
 
 
-def _pairs_data(n_pairs: int, seed: int) -> tuple[sp.csr_matrix, np.ndarray]:
+class PairsData(NamedTuple):
+    """Synthetic pair features and their bool labels (True = same author)."""
+
+    features: sp.csr_matrix
+    labels: np.ndarray
+
+
+def _pairs_data(n_pairs: int, seed: int) -> PairsData:
     """Non-negative sparse pair features (MNB needs counts) with a bool label, as in the notebooks.
 
     Pair i is a same-author pair (True) when i is even; same pairs have larger values in the
     first five columns.
     """
     rng = np.random.default_rng(seed)
-    y = np.arange(n_pairs) % 2 == 0
-    X = rng.poisson(1.0, size=(n_pairs, 20)).astype(np.float64)
-    X[y, :5] += rng.poisson(3.0, size=(int(y.sum()), 5))
-    return sp.csr_matrix(X), y
+    labels = np.arange(n_pairs) % 2 == 0
+    counts = rng.poisson(1.0, size=(n_pairs, 20)).astype(np.float64)
+    counts[labels, :5] += rng.poisson(3.0, size=(int(labels.sum()), 5))
+    return PairsData(features=sp.csr_matrix(counts), labels=labels)
 
 
 @pytest.fixture(scope="module")
-def pairs_data() -> tuple[sp.csr_matrix, np.ndarray]:
+def pairs_data() -> PairsData:
     """60 training pairs."""
     return _pairs_data(n_pairs=60, seed=1)
 
@@ -93,14 +101,14 @@ def _low_params(classifier_name: str) -> dict[str, object]:
 
 def _fitted(
     classifier_name: str,
-    X: sp.csr_matrix,
-    y: np.ndarray,
+    features: sp.csr_matrix,
+    labels: np.ndarray,
     n_jobs: int = 1,
 ) -> object:
-    """The classifier with the low end of every searched hyperparameter, fitted on X, y."""
+    """The classifier with the low end of every searched hyperparameter, fitted on the pairs."""
     params = _low_params(classifier_name)
     classifier = build_classifier(classifier_name, params, n_jobs=n_jobs)
-    classifier.fit(X, y)
+    classifier.fit(features, labels)
     return classifier
 
 
@@ -296,18 +304,19 @@ def test_build_classifier_takes_exactly_the_searched_params(
         build_classifier(classifier_name, params, n_jobs=n_jobs)
 
 
-def test_build_classifier_puts_an_unfitted_copy_of_the_scaler_in_front(
-    pairs_data: tuple[sp.csr_matrix, np.ndarray],
+def test_build_classifier_gives_each_pipeline_its_own_scaler_copy(
+    pairs_data: PairsData,
 ) -> None:
-    """With a scaler the result is a pipeline of a copy of it and the classifier."""
-    X, y = pairs_data
+    """The pipeline fits its own copy of the scaler, so one scaler can be passed to every trial."""
+    features = pairs_data.features
+    labels = pairs_data.labels
     classifier_name = "linear_svc"
     scaler = StandardScaler(with_mean=False)
     params = {"C": 1.0, "loss": "squared_hinge", "class_weight": None}
     n_jobs = 1
 
     pipeline = build_classifier(classifier_name, params, n_jobs=n_jobs, scaler=scaler)
-    pipeline.fit(X, y)
+    pipeline.fit(features, labels)
 
     assert isinstance(pipeline, Pipeline)
     assert pipeline.named_steps["scaler"] is not scaler
@@ -318,18 +327,19 @@ def test_build_classifier_puts_an_unfitted_copy_of_the_scaler_in_front(
 @pytest.mark.parametrize("classifier_name", CLASSIFIER_NAMES)
 def test_predict_pairs_decides_with_predict_and_scores_with_the_probability(
     classifier_name: str,
-    pairs_data: tuple[sp.csr_matrix, np.ndarray],
+    pairs_data: PairsData,
 ) -> None:
     """pred is predict as 0 / 1 (fitted on bool labels); score is the class-1 probability or the decision function."""
-    X, y = pairs_data
-    classifier = _fitted(classifier_name, X, y)
+    features = pairs_data.features
+    labels = pairs_data.labels
+    classifier = _fitted(classifier_name, features, labels)
     score_method = getattr(classifier, SCORE_METHODS[classifier_name])
-    expected_score = score_method(X)
+    expected_score = score_method(features)
     if expected_score.ndim == 2:
         expected_score = expected_score[:, 1]
-    expected_pred = classifier.predict(X).astype(int)
+    expected_pred = classifier.predict(features).astype(int)
 
-    predictions = predict_pairs(classifier, classifier_name, X)
+    predictions = predict_pairs(classifier, classifier_name, features)
 
     assert predictions.pred.dtype == np.dtype(int)
     assert np.array_equal(predictions.pred, expected_pred)
@@ -338,18 +348,19 @@ def test_predict_pairs_decides_with_predict_and_scores_with_the_probability(
 
 
 def test_predict_pairs_keeps_the_decision_of_predict_on_a_linear_svc_tie(
-    pairs_data: tuple[sp.csr_matrix, np.ndarray],
+    pairs_data: PairsData,
 ) -> None:
     """A LinearSVC score of exactly 0 is "different author", as its predict says (score > 0)."""
-    X, y = pairs_data
+    features = pairs_data.features
+    labels = pairs_data.labels
     classifier_name = "linear_svc"
-    classifier = _fitted(classifier_name, X, y)
+    classifier = _fitted(classifier_name, features, labels)
     # every decision value becomes exactly 0
     classifier.coef_[:] = 0.0
     classifier.intercept_[:] = 0.0
-    expected_pred = np.zeros(X.shape[0], dtype=int)
+    expected_pred = np.zeros(features.shape[0], dtype=int)
 
-    predictions = predict_pairs(classifier, classifier_name, X)
+    predictions = predict_pairs(classifier, classifier_name, features)
 
     assert np.all(predictions.score == 0.0)
     assert np.array_equal(predictions.pred, expected_pred)
@@ -357,16 +368,16 @@ def test_predict_pairs_keeps_the_decision_of_predict_on_a_linear_svc_tie(
 
 def test_predict_pairs_keeps_the_decision_of_predict_on_a_knn_tie() -> None:
     """Two neighbours that disagree give the probability 0.5 and "different author"."""
-    X_fit = sp.csr_matrix(np.array([[0.0, 1.0], [0.0, 3.0]]))
-    y_fit = np.array([True, False])
-    X_target = sp.csr_matrix(np.array([[0.0, 2.0]]))
+    fit_features = sp.csr_matrix(np.array([[0.0, 1.0], [0.0, 3.0]]))
+    fit_labels = np.array([True, False])
+    target_features = sp.csr_matrix(np.array([[0.0, 2.0]]))
     classifier_name = "k-nearest_neighbors"
     params = {"n_neighbors": 2, "weights": "uniform", "metric": "euclidean"}
     n_jobs = 1
     classifier = build_classifier(classifier_name, params, n_jobs=n_jobs)
-    classifier.fit(X_fit, y_fit)
+    classifier.fit(fit_features, fit_labels)
 
-    predictions = predict_pairs(classifier, classifier_name, X_target)
+    predictions = predict_pairs(classifier, classifier_name, target_features)
 
     assert predictions.score.tolist() == [0.5]
     assert predictions.pred.tolist() == [0]
