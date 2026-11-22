@@ -46,6 +46,26 @@ SCORE_METHODS = {
 }
 
 
+class PairsData(NamedTuple):
+    """Synthetic pair features and their bool labels (True = same author)."""
+
+    features: sp.csr_matrix
+    labels: np.ndarray
+
+
+def _pairs_data(n_pairs: int, seed: int) -> PairsData:
+    """Non-negative sparse pair features (MNB needs counts) with a bool label, as in the notebooks.
+
+    Pair i is a same-author pair (True) when i is even; same pairs have larger values in the
+    first five columns.
+    """
+    rng = np.random.default_rng(seed)
+    labels = np.arange(n_pairs) % 2 == 0
+    counts = rng.poisson(1.0, size=(n_pairs, 20)).astype(np.float64)
+    counts[labels, :5] += rng.poisson(3.0, size=(int(labels.sum()), 5))
+    return PairsData(features=sp.csr_matrix(counts), labels=labels)
+
+
 class RecordingTrial:
     """A stand-in for an Optuna trial that records every suggestion and returns the low end."""
 
@@ -69,26 +89,6 @@ class RecordingTrial:
     ) -> float:
         self.calls.append((name, FloatDistribution(low, high, log=log)))
         return low
-
-
-class PairsData(NamedTuple):
-    """Synthetic pair features and their bool labels (True = same author)."""
-
-    features: sp.csr_matrix
-    labels: np.ndarray
-
-
-def _pairs_data(n_pairs: int, seed: int) -> PairsData:
-    """Non-negative sparse pair features (MNB needs counts) with a bool label, as in the notebooks.
-
-    Pair i is a same-author pair (True) when i is even; same pairs have larger values in the
-    first five columns.
-    """
-    rng = np.random.default_rng(seed)
-    labels = np.arange(n_pairs) % 2 == 0
-    counts = rng.poisson(1.0, size=(n_pairs, 20)).astype(np.float64)
-    counts[labels, :5] += rng.poisson(3.0, size=(int(labels.sum()), 5))
-    return PairsData(features=sp.csr_matrix(counts), labels=labels)
 
 
 @pytest.fixture(scope="module")

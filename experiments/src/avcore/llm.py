@@ -199,6 +199,27 @@ def _fill(template: str, text1: str, text2: str) -> str:
     return _PLACEHOLDER_PATTERN.sub(text_of, template)
 
 
+def neutralize_template_strings(
+    text: str,
+    strings: Sequence[str] = TEMPLATE_STRINGS,
+) -> tuple[str, int]:
+    """Replace every occurrence of the given strings in a text by one space.
+
+    Args:
+        text: One text of a pair.
+        strings: The strings to replace - the prompt template strings, or the special tokens
+            of a tokenizer, which the cut to the token limit would delete and glue the words.
+
+    Returns:
+        The text without the strings and the number of strings replaced.
+    """
+    count = 0
+    for string in strings:
+        count += text.count(string)
+        text = text.replace(string, " ")
+    return text, count
+
+
 def truncate_text(tokenizer: Any, text: str, max_tokens: int | None) -> str:
     """Cut a text to its first max_tokens tokens and strip it, so a pair fits a short context.
 
