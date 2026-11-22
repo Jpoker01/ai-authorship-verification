@@ -515,11 +515,11 @@ def test_predict_pairs_predicts_a_forest_with_one_thread(
     "classifier_name",
     ["linear_svc", "logistic_regression", "random_forest"],
 )
-def test_predict_pairs_works_through_a_pipeline_with_a_scaler(
+def test_predict_pairs_predicts_with_the_whole_pipeline(
     classifier_name: str,
     pairs_data: PairsData,
 ) -> None:
-    """The decision and the score come from the whole pipeline (scaled features)."""
+    """predict_pairs predicts with the pipeline (scaler first), not only with the classifier in it."""
     features = pairs_data.features
     labels = pairs_data.labels
     scaler = StandardScaler(with_mean=False)
@@ -530,12 +530,16 @@ def test_predict_pairs_works_through_a_pipeline_with_a_scaler(
 
     predictions = predict_pairs(pipeline, classifier_name, features)
 
-    # read after predict_pairs, which leaves a forest with one thread, so both sums match
-    expected_score = getattr(pipeline, SCORE_METHODS[classifier_name])(features)
-    if expected_score.ndim == 2:
-        expected_score = expected_score[:, 1]
-    assert np.array_equal(predictions.pred, pipeline.predict(features).astype(int))
-    assert np.array_equal(predictions.score, expected_score)
+    # the pipeline's own answer; asked after predict_pairs, which sets a forest to one
+    # thread, so the forest adds up its votes in the same order both times
+    pipeline_pred = pipeline.predict(features).astype(int)
+    if classifier_name == "linear_svc":
+        pipeline_score = pipeline.decision_function(features)
+    else:
+        same_author_column = 1
+        pipeline_score = pipeline.predict_proba(features)[:, same_author_column]
+    assert np.array_equal(predictions.pred, pipeline_pred)
+    assert np.array_equal(predictions.score, pipeline_score)
 
 
 def test_predict_pairs_refuses_labels_other_than_0_and_1(
@@ -605,18 +609,20 @@ def test_prediction_table_is_accepted_by_write_run_files(
     pairs_data: PairsData,
     tmp_path: Path,
 ) -> None:
-    """A table of real predictions is written by tracking.write_run_files as predictions-test."""
+    """A prediction table of real XGBoost predictions passes the checks of write_run_files."""
     features = pairs_data.features
     labels = pairs_data.labels
     classifier_name = "xgboost"
-    classifier = _fitted(classifier_name, features, labels)
     pair_ids = []
     for pair_number in range(len(labels)):
         pair_ids.append(f"p{pair_number}")
     pairs_df = pd.DataFrame({"id": pair_ids, "same": labels})
+    classifier = _fitted(classifier_name, features, labels)
     predictions = predict_pairs(classifier, classifier_name, features)
     table_df = build_prediction_table(pairs_df, predictions)
-    context = tracking.RunContext(environment={"commit": "a" * 40}, packages={})
+    fake_commit = "a" * 40
+    context = tracking.RunContext(environment={"commit": fake_commit}, packages={})
+    # write_run_files takes only an absolute folder with _v2 in its name that does not exist
     run_dir = tmp_path / "run_v2"
 
     tracking.write_run_files(
@@ -628,6 +634,7 @@ def test_prediction_table_is_accepted_by_write_run_files(
         figures={},
     )
 
-    manifest_text = (run_dir / tracking.MANIFEST_FILE).read_text(encoding="utf-8")
-    manifest = json.loads(manifest_text)
-    assert "predictions-test.csv" in manifest["files"]
+    manifest_path = run_dir / tracking.MANIFEST_FILE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    written_files = manifest["files"]
+    assert "predictions-test.csv" in written_files
