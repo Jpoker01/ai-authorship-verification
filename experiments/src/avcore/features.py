@@ -67,8 +67,8 @@ class PairFeatures:
     """Features of the fit pairs and of the target pairs.
 
     Attributes:
-        X_fit: Features of the first and of the second text of every fit pair.
-        X_target: Features of the first and of the second text of every target pair.
+        fit_sides: Features of the first and of the second text of every fit pair.
+        target_sides: Features of the first and of the second text of every target pair.
         fit_pairs_df: Id and label of every fit pair.
         target_pairs_df: Id and label of every target pair.
         vectorizer: Fitted scikit-learn vectorizer that gives the same features from raw texts,
@@ -76,7 +76,7 @@ class PairFeatures:
     """
 
     X_fit: tuple[sp.csr_matrix, sp.csr_matrix]
-    X_target: tuple[sp.csr_matrix, sp.csr_matrix]
+    target_sides: tuple[sp.csr_matrix, sp.csr_matrix]
     fit_pairs_df: pd.DataFrame
     target_pairs_df: pd.DataFrame
     vectorizer: CountVectorizer | TfidfVectorizer | None
@@ -142,7 +142,9 @@ def split_sides(pairs_df: pd.DataFrame, vectors: sp.csr_matrix) -> SplitMatrices
 
 
 def build_token_counts(
-    cleaned_paths: Mapping[str, Path], *, lowercase: bool
+    cleaned_paths: Mapping[str, Path],
+    *,
+    lowercase: bool,
 ) -> PairMatrices:
     """Count the words of every text once, streamed from the cleaned jsonl files.
 
@@ -179,7 +181,7 @@ def build_token_counts(
     fit_counts.sort_indices()
     if fit_counts.shape[0] != 2 * (n_train + n_validation):
         raise ValueError(
-            f"{fit_counts.shape[0]} rows for {n_train + n_validation} pairs."
+            f"{fit_counts.shape[0]} rows for {n_train + n_validation} pairs.",
         )
 
     # the test texts are only counted on these columns, so their own terms are dropped
@@ -214,7 +216,7 @@ def _check_splits(fit_splits: Sequence[str], target_split: str) -> None:
     combination = (tuple(fit_splits), target_split)
     if combination not in (TUNING_SPLITS, FINAL_SPLITS, HELD_OUT_SPLITS):
         raise ValueError(
-            f"fit_splits {list(fit_splits)} with target_split {target_split!r} is not allowed."
+            f"fit_splits {list(fit_splits)} with target_split {target_split!r} is not allowed.",
         )
 
 
@@ -266,7 +268,7 @@ def _select_columns(
     columns = np.flatnonzero(
         (document_frequencies > 0)
         & (document_frequencies >= min_documents)
-        & (document_frequencies <= max_documents)
+        & (document_frequencies <= max_documents),
     )
     if max_features is not None and len(columns) > max_features:
         # total count of every term in the fit documents, int64 as in scikit-learn on every
@@ -282,7 +284,7 @@ def _select_columns(
 
     if len(columns) == 0:
         raise ValueError(
-            "After pruning, no terms remain. Try a lower min_df or a higher max_df."
+            "After pruning, no terms remain. Try a lower min_df or a higher max_df.",
         )
     return columns
 
@@ -301,7 +303,8 @@ def _vocabulary(token_counts: PairMatrices, columns: np.ndarray) -> dict[str, in
 
 
 def _stack_fit_documents(
-    token_counts: PairMatrices, fit_splits: Sequence[str]
+    token_counts: PairMatrices,
+    fit_splits: Sequence[str],
 ) -> tuple[sp.csr_matrix, pd.DataFrame]:
     """Return the counts of every fit document and the fit pairs they belong to.
 
@@ -332,13 +335,15 @@ def _stack_fit_documents(
 
 
 def _bow_matrix(
-    counts: sp.csr_matrix, columns: np.ndarray, binary: bool
+    counts: sp.csr_matrix,
+    columns: np.ndarray,
+    binary: bool,
 ) -> sp.csr_matrix:
     """Return the kept columns as CountVectorizer returns them (int64, 1 for a present term if binary)."""
-    X = counts[:, columns].astype(np.int64)
+    bow_counts = counts[:, columns].astype(np.int64)
     if binary:
-        X.data.fill(1)
-    return X
+        bow_counts.data.fill(1)
+    return bow_counts
 
 
 def build_bow_features(
@@ -380,7 +385,10 @@ def build_bow_features(
     if binary:
         fit_counts.data.fill(1)
     columns = _select_columns(
-        fit_counts, max_features=max_features, min_df=min_df, max_df=max_df
+        fit_counts,
+        max_features=max_features,
+        min_df=min_df,
+        max_df=max_df,
     )
     vectorizer = CountVectorizer(
         lowercase=token_counts.settings["lowercase"],
@@ -391,11 +399,11 @@ def build_bow_features(
     # vectorizer counts as fitted like the TF-IDF one
     vectorizer.fit([])
     return PairFeatures(
-        X_fit=(
+        fit_sides=(
             _bow_matrix(fit_counts[:n_fit_pairs], columns, binary),
             _bow_matrix(fit_counts[n_fit_pairs:], columns, binary),
         ),
-        X_target=(
+        target_sides=(
             _bow_matrix(target.first, columns, binary),
             _bow_matrix(target.second, columns, binary),
         ),
@@ -440,7 +448,10 @@ def build_tfidf_features(
     n_fit_pairs = len(fit_pairs_df)
     target = token_counts.splits[target_split]
     columns = _select_columns(
-        fit_counts, max_features=max_features, min_df=min_df, max_df=1.0
+        fit_counts,
+        max_features=max_features,
+        min_df=min_df,
+        max_df=1.0,
     )
     kept_counts = fit_counts[:, columns]
     # the counts of all columns are not needed any more and can be freed before the weighting
@@ -454,11 +465,11 @@ def build_tfidf_features(
     )
     vectorizer.idf_ = transformer.idf_
     return PairFeatures(
-        X_fit=(
+        fit_sides=(
             transformer.transform(kept_counts[:n_fit_pairs]),
             transformer.transform(kept_counts[n_fit_pairs:]),
         ),
-        X_target=(
+        target_sides=(
             transformer.transform(target.first[:, columns]),
             transformer.transform(target.second[:, columns]),
         ),
@@ -469,22 +480,22 @@ def build_tfidf_features(
 
 
 def compute_absolute_difference_features(
-    X_pair: tuple[sp.csr_matrix, sp.csr_matrix],
+    pair_sides: tuple[sp.csr_matrix, sp.csr_matrix],
 ) -> sp.csr_matrix:
     """Return |first - second| for every pair, one row per pair.
 
     Args:
-        X_pair: Features of the first and of the second text of every pair.
+        pair_sides: Features of the first and of the second text of every pair.
 
     Returns:
         The absolute difference of the two feature vectors of every pair.
     """
-    X_1, X_2 = X_pair
-    return abs(X_1 - X_2)
+    first_side, second_side = pair_sides
+    return abs(first_side - second_side)
 
 
 def compute_element_wise_features(
-    X_pair: tuple[sp.csr_matrix, sp.csr_matrix],
+    pair_sides: tuple[sp.csr_matrix, sp.csr_matrix],
 ) -> sp.csr_matrix:
     """Return first * second, feature by feature, for every pair, one row per pair.
 
@@ -494,17 +505,17 @@ def compute_element_wise_features(
     Returns:
         The element-wise product of the two feature vectors of every pair.
     """
-    X_1, X_2 = X_pair
-    return X_1.multiply(X_2)
+    first_side, second_side = pair_sides
+    return first_side.multiply(second_side)
 
 
 def compute_cosine_similarities(
-    X_pair: tuple[sp.csr_matrix | np.ndarray, sp.csr_matrix | np.ndarray],
+    pair_sides: tuple[sp.csr_matrix | np.ndarray, sp.csr_matrix | np.ndarray],
 ) -> np.ndarray:
     """Return the cosine similarity of the two texts of every pair.
 
     Args:
-        X_pair: Vectors of the first and of the second text of every pair.
+        pair_sides: Vectors of the first and of the second text of every pair.
 
     Raises:
         ValueError: If the two sides do not have the same shape.
@@ -512,15 +523,17 @@ def compute_cosine_similarities(
     Returns:
         One similarity per pair; 0 when one of the two vectors has only zeros.
     """
-    X_1, X_2 = X_pair
-    if X_1.shape != X_2.shape:
-        raise ValueError(f"The sides have the shapes {X_1.shape} and {X_2.shape}.")
-    n_pairs = X_1.shape[0]
+    first_side, second_side = pair_sides
+    if first_side.shape != second_side.shape:
+        raise ValueError(
+            f"The sides have the shapes {first_side.shape} and {second_side.shape}.",
+        )
+    n_pairs = first_side.shape[0]
     similarities = []
     for row in range(n_pairs):
         # a slice keeps the row two-dimensional, as cosine_similarity expects
-        first_vector = X_1[row : row + 1]
-        second_vector = X_2[row : row + 1]
+        first_vector = first_side[row : row + 1]
+        second_vector = second_side[row : row + 1]
         # one vector against one vector gives a 1 x 1 matrix
         similarity = cosine_similarity(first_vector, second_vector)[0, 0]
         similarities.append(similarity)

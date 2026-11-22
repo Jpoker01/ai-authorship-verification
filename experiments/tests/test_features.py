@@ -223,10 +223,16 @@ def test_build_bow_features_equal_the_fitted_count_vectorizer(
         binary=binary,
     )
 
-    _assert_same_matrix(features.X_fit[0], reference.transform(_side(fit_df, 0)))
-    _assert_same_matrix(features.X_fit[1], reference.transform(_side(fit_df, 1)))
-    _assert_same_matrix(features.X_target[0], reference.transform(_side(target_df, 0)))
-    _assert_same_matrix(features.X_target[1], reference.transform(_side(target_df, 1)))
+    _assert_same_matrix(features.fit_sides[0], reference.transform(_side(fit_df, 0)))
+    _assert_same_matrix(features.fit_sides[1], reference.transform(_side(fit_df, 1)))
+    _assert_same_matrix(
+        features.target_sides[0],
+        reference.transform(_side(target_df, 0)),
+    )
+    _assert_same_matrix(
+        features.target_sides[1],
+        reference.transform(_side(target_df, 1)),
+    )
     _assert_pairs_of_rows(features, fit_df, target_df)
 
 
@@ -269,10 +275,16 @@ def test_build_tfidf_features_equal_the_fitted_tfidf_vectorizer(
         sublinear_tf=sublinear_tf,
     )
 
-    _assert_same_matrix(features.X_fit[0], reference.transform(_side(fit_df, 0)))
-    _assert_same_matrix(features.X_fit[1], reference.transform(_side(fit_df, 1)))
-    _assert_same_matrix(features.X_target[0], reference.transform(_side(target_df, 0)))
-    _assert_same_matrix(features.X_target[1], reference.transform(_side(target_df, 1)))
+    _assert_same_matrix(features.fit_sides[0], reference.transform(_side(fit_df, 0)))
+    _assert_same_matrix(features.fit_sides[1], reference.transform(_side(fit_df, 1)))
+    _assert_same_matrix(
+        features.target_sides[0],
+        reference.transform(_side(target_df, 0)),
+    )
+    _assert_same_matrix(
+        features.target_sides[1],
+        reference.transform(_side(target_df, 1)),
+    )
     _assert_pairs_of_rows(features, fit_df, target_df)
 
 
@@ -319,8 +331,14 @@ def test_features_vectorizer_gives_the_same_features_from_raw_texts(
     vectorizer = joblib.load(vectorizer_path)
 
     check_is_fitted(vectorizer)
-    _assert_same_matrix(vectorizer.transform(_side(target_df, 0)), features.X_target[0])
-    _assert_same_matrix(vectorizer.transform(_side(target_df, 1)), features.X_target[1])
+    _assert_same_matrix(
+        vectorizer.transform(_side(target_df, 0)),
+        features.target_sides[0],
+    )
+    _assert_same_matrix(
+        vectorizer.transform(_side(target_df, 1)),
+        features.target_sides[1],
+    )
 
 
 def test_build_token_counts_ignores_terms_of_the_test_texts(tmp_path: Path) -> None:
@@ -351,13 +369,13 @@ def test_train_only_vocabulary_ignores_terms_of_the_validation_texts(
     """A term of the validation texts only is a feature of the final model, never of a tuning trial or of the held-out test scores."""
     pairs_by_split = {
         "train": pd.DataFrame(
-            [{"id": "t0", "pair": ["apple pear", "apple plum"], "same": True}]
+            [{"id": "t0", "pair": ["apple pear", "apple plum"], "same": True}],
         ),
         "validation": pd.DataFrame(
-            [{"id": "v0", "pair": ["zebra apple", "zebra zebra"], "same": False}]
+            [{"id": "v0", "pair": ["zebra apple", "zebra zebra"], "same": False}],
         ),
         "test": pd.DataFrame(
-            [{"id": "e0", "pair": ["zebra pear", "yak"], "same": True}]
+            [{"id": "e0", "pair": ["zebra pear", "yak"], "same": True}],
         ),
     }
     cleaned_paths = _write_splits(pairs_by_split, tmp_path)
@@ -399,7 +417,7 @@ def test_train_only_vocabulary_ignores_terms_of_the_validation_texts(
     assert sorted(final.vectorizer.vocabulary_) == ["apple", "pear", "plum", "zebra"]
     assert sorted(held_out.vectorizer.vocabulary_) == ["apple", "pear", "plum"]
     # "yak" is a term of the test texts only, so the second test text has no feature
-    assert held_out.X_target[1].nnz == 0
+    assert held_out.target_sides[1].nnz == 0
 
 
 def test_build_token_counts_requires_the_three_splits(tmp_path: Path) -> None:
@@ -419,7 +437,7 @@ def test_read_pair_labels_keeps_ids_as_strings(tmp_path: Path) -> None:
             "id": ["007", "NA", "nan"],
             "pair": [["a b", "c d"], ["e f", "g h"], ["i j", "k l"]],
             "same": [True, False, True],
-        }
+        },
     )
     path = tmp_path / "pairs.jsonl"
     write_pairs_jsonl(pairs_df, path)
@@ -441,7 +459,8 @@ def test_split_sides_rejects_a_row_count_that_is_not_two_per_pair() -> None:
 
 
 def test_build_token_counts_rejects_labels_that_do_not_match_the_texts(
-    cleaned_paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    cleaned_paths: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One validation label fewer than its texts (a file read with another number of lines) raises instead of pairing the wrong texts."""
     read_all_labels = features_module.read_pair_labels
@@ -454,7 +473,9 @@ def test_build_token_counts_rejects_labels_that_do_not_match_the_texts(
         return labels_df
 
     monkeypatch.setattr(
-        features_module, "read_pair_labels", read_labels_without_one_validation_pair
+        features_module,
+        "read_pair_labels",
+        read_labels_without_one_validation_pair,
     )
     lowercase = False
 
@@ -464,7 +485,9 @@ def test_build_token_counts_rejects_labels_that_do_not_match_the_texts(
 
 @pytest.mark.parametrize(("fit_splits", "target_split"), OTHER_SPLIT_COMBINATIONS)
 def test_build_bow_features_rejects_other_split_combinations(
-    token_counts: PairMatrices, fit_splits: list[str], target_split: str
+    token_counts: PairMatrices,
+    fit_splits: list[str],
+    target_split: str,
 ) -> None:
     """Any combination but train -> validation, train + validation -> test and train -> test is refused, so the test split never fits anything."""
     max_features = None
@@ -486,7 +509,9 @@ def test_build_bow_features_rejects_other_split_combinations(
 
 @pytest.mark.parametrize(("fit_splits", "target_split"), OTHER_SPLIT_COMBINATIONS)
 def test_build_tfidf_features_rejects_other_split_combinations(
-    token_counts: PairMatrices, fit_splits: list[str], target_split: str
+    token_counts: PairMatrices,
+    fit_splits: list[str],
+    target_split: str,
 ) -> None:
     """Any combination but train -> validation, train + validation -> test and train -> test is refused, so the test split never fits anything."""
     max_features = None
@@ -512,7 +537,10 @@ def test_build_tfidf_features_rejects_other_split_combinations(
     ],
 )
 def test_build_bow_features_raise_the_errors_of_scikit_learn(
-    token_counts: PairMatrices, min_df: float, max_df: float, error_message: str
+    token_counts: PairMatrices,
+    min_df: float,
+    max_df: float,
+    error_message: str,
 ) -> None:
     """A document frequency range that is empty or keeps no term raises the ValueError of CountVectorizer."""
     fit_splits, target_split = TUNING
@@ -533,12 +561,12 @@ def test_build_bow_features_raise_the_errors_of_scikit_learn(
 
 def test_compute_absolute_difference_features() -> None:
     """Row i holds |first - second| of pair i, as a sparse matrix."""
-    X_1 = sp.csr_matrix(np.array([[1.0, 0.0, 2.0], [0.0, 3.0, 0.0]]))
-    X_2 = sp.csr_matrix(np.array([[4.0, 0.0, 2.0], [0.0, 1.0, 5.0]]))
-    X_pair = (X_1, X_2)
+    first_side = sp.csr_matrix(np.array([[1.0, 0.0, 2.0], [0.0, 3.0, 0.0]]))
+    second_side = sp.csr_matrix(np.array([[4.0, 0.0, 2.0], [0.0, 1.0, 5.0]]))
+    pair_sides = (first_side, second_side)
     expected = np.array([[3.0, 0.0, 0.0], [0.0, 2.0, 5.0]])
 
-    difference = compute_absolute_difference_features(X_pair)
+    difference = compute_absolute_difference_features(pair_sides)
 
     assert sp.issparse(difference)
     assert np.array_equal(difference.toarray(), expected)
@@ -546,12 +574,12 @@ def test_compute_absolute_difference_features() -> None:
 
 def test_compute_element_wise_features() -> None:
     """Row i holds first * second of pair i, feature by feature, as a sparse matrix."""
-    X_1 = sp.csr_matrix(np.array([[1.0, 0.0, 2.0], [0.0, 3.0, 0.0]]))
-    X_2 = sp.csr_matrix(np.array([[4.0, 0.0, 2.0], [0.0, 1.0, 5.0]]))
-    X_pair = (X_1, X_2)
+    first_side = sp.csr_matrix(np.array([[1.0, 0.0, 2.0], [0.0, 3.0, 0.0]]))
+    second_side = sp.csr_matrix(np.array([[4.0, 0.0, 2.0], [0.0, 1.0, 5.0]]))
+    pair_sides = (first_side, second_side)
     expected = np.array([[4.0, 0.0, 4.0], [0.0, 3.0, 0.0]])
 
-    product = compute_element_wise_features(X_pair)
+    product = compute_element_wise_features(pair_sides)
 
     assert sp.issparse(product)
     assert np.array_equal(product.toarray(), expected)
@@ -569,11 +597,11 @@ def test_compute_cosine_similarities_equal_scikit_learn_pair_by_pair(
         for row in range(3)
     ]
     if sparse:
-        X_pair = (sp.csr_matrix(first), sp.csr_matrix(second))
+        pair_sides = (sp.csr_matrix(first), sp.csr_matrix(second))
     else:
-        X_pair = (first, second)
+        pair_sides = (first, second)
 
-    similarities = compute_cosine_similarities(X_pair)
+    similarities = compute_cosine_similarities(pair_sides)
 
     assert similarities.tolist() == expected
     assert similarities[1] == 0.0
@@ -620,18 +648,20 @@ def test_editing_the_returned_labels_leaves_the_token_counts_unchanged(
     features.target_pairs_df["score"] = 0.5
 
     pd.testing.assert_frame_equal(
-        token_counts.splits["train"].pairs_df, train_labels_before
+        token_counts.splits["train"].pairs_df,
+        train_labels_before,
     )
     pd.testing.assert_frame_equal(
-        token_counts.splits["validation"].pairs_df, validation_labels_before
+        token_counts.splits["validation"].pairs_df,
+        validation_labels_before,
     )
 
 
 def test_compute_cosine_similarities_rejects_sides_of_another_shape() -> None:
     """Sides with another number of rows raise ValueError instead of scoring only the shorter one."""
-    X_1 = sp.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0]]))
-    X_2 = sp.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]))
-    X_pair = (X_1, X_2)
+    first_side = sp.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0]]))
+    second_side = sp.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]))
+    pair_sides = (first_side, second_side)
 
     with pytest.raises(ValueError, match="shapes"):
-        compute_cosine_similarities(X_pair)
+        compute_cosine_similarities(pair_sides)
