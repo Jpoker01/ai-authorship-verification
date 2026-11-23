@@ -18,6 +18,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from avcore.classifiers import THREADED_CLASSIFIERS
+
 K8S_DIR = Path(__file__).resolve().parent
 OUTPUTS_DIR = K8S_DIR.parent / "outputs"
 TEMPLATE_PATH = K8S_DIR / "traditional-job.yaml"
@@ -34,7 +36,6 @@ CLASSIFIERS = [
     "logistic_regression",
     "multinomial_naive_bayes",
 ]
-THREADED_CLASSIFIERS = ["k-nearest_neighbors", "random_forest", "xgboost"]
 JOB_NAME_PARTS = {
     "absolute_difference": "absdiff",
     "element-wise": "elementwise",
@@ -62,6 +63,7 @@ class Run:
     notebook: str
     params: dict[str, object]
     cpu: int
+    omp_threads: int
     memory: str
     min_free_gb: int
 
@@ -71,6 +73,7 @@ def make_run(
     notebook: str,
     params: dict[str, object],
     resources: dict[str, object],
+    omp_threads: int,
     smoke_tag: str,
 ) -> Run:
     """Return one run, with the smoke settings added when smoke_tag is set."""
@@ -84,6 +87,7 @@ def make_run(
         notebook=notebook,
         params=params,
         cpu=resources["cpu"],
+        omp_threads=omp_threads,
         memory=resources["memory"],
         min_free_gb=resources["min_free_gb"],
     )
@@ -111,6 +115,10 @@ def build_runs(smoke_tag: str) -> list[Run]:
                 n_jobs = 1
                 if classifier in THREADED_CLASSIFIERS:
                     n_jobs = resources["cpu"]
+                omp_threads = resources["cpu"]
+                # each joblib thread of kNN starts its own OpenMP team
+                if classifier == "k-nearest_neighbors":
+                    omp_threads = 1
                 params = {
                     "SMOKE": bool(smoke_tag),
                     "REPRESENTATION": representation,
@@ -129,6 +137,7 @@ def build_runs(smoke_tag: str) -> list[Run]:
                     notebook=PAIRWISE_NOTEBOOK,
                     params=params,
                     resources=resources,
+                    omp_threads=omp_threads,
                     smoke_tag=smoke_tag,
                 )
                 runs.append(run)
@@ -143,6 +152,7 @@ def build_runs(smoke_tag: str) -> list[Run]:
             notebook=COSINE_NOTEBOOK,
             params=params,
             resources=resources,
+            omp_threads=resources["cpu"],
             smoke_tag=smoke_tag,
         )
         runs.append(run)
@@ -179,6 +189,7 @@ def render(template: str, run: Run, launch_tag: str) -> str:
     fields = {
         "{{JOB_NAME}}": run.job_name,
         "{{CPU}}": str(run.cpu),
+        "{{OMP_THREADS}}": str(run.omp_threads),
         "{{MEMORY}}": run.memory,
         "{{LAUNCH_TAG}}": launch_tag,
         "{{NOTEBOOK}}": run.notebook,
@@ -207,20 +218,6 @@ def check_runs(runs: list[Run]) -> None:
         if run.job_name in names:
             sys.exit(f"{run.job_name!r} twice")
         names.add(run.job_name)
-
-
-def check_threaded_classifiers() -> None:
-    """Refuse a THREADED_CLASSIFIERS list that differs from the one of avcore.classifiers.
-
-    Raises:
-        SystemExit: If the two lists differ.
-    """
-    from avcore import classifiers
-
-    if sorted(THREADED_CLASSIFIERS) != sorted(classifiers.THREADED_CLASSIFIERS):
-        sys.exit(
-            "THREADED_CLASSIFIERS differs from avcore.classifiers.THREADED_CLASSIFIERS",
-        )
 
 
 def current_commit() -> str:
@@ -291,7 +288,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    check_threaded_classifiers()
     if not args.out_dir.resolve().is_relative_to(OUTPUTS_DIR):
         sys.exit(
             f"out_dir has to be below {OUTPUTS_DIR} - git ignores only that folder",
