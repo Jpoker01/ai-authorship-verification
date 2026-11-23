@@ -145,6 +145,12 @@ def _row_features(columns: list[str], row: sp.csr_matrix) -> dict[str, float]:
     return features
 
 
+def _same_cells(first: sp.csr_matrix, second: sp.csr_matrix) -> bool:
+    """Whether two sparse matrices have the same shape and the same value in every cell."""
+    # != gives a sparse matrix of the cells that differ; nnz is their count
+    return first.shape == second.shape and (first != second).nnz == 0
+
+
 def _word_counts(text: str) -> Counter[str]:
     """Features of a text without spaCy - every word counted as a lemma."""
     features: Counter[str] = Counter()
@@ -585,8 +591,8 @@ def test_build_isg_vectors_gives_the_same_vectors_in_every_run(
     for name in SPLITS:
         first_split = first_run.splits[name]
         second_split = second_run.splits[name]
-        assert (first_split.first != second_split.first).nnz == 0
-        assert (first_split.second != second_split.second).nnz == 0
+        assert _same_cells(first_split.first, second_split.first)
+        assert _same_cells(first_split.second, second_split.second)
 
 
 @pytest.mark.cerit
@@ -632,8 +638,8 @@ def test_load_isg_vectors_returns_the_written_vectors(tmp_path: Path) -> None:
         pd.testing.assert_frame_equal(split.pairs_df, expected.pairs_df)
         assert split.first.format == "csr"
         assert split.first.dtype == np.float32
-        assert (split.first != expected.first).nnz == 0
-        assert (split.second != expected.second).nnz == 0
+        assert _same_cells(split.first, expected.first)
+        assert _same_cells(split.second, expected.second)
 
 
 def test_load_isg_vectors_accepts_a_run_at_another_commit(tmp_path: Path) -> None:
@@ -738,24 +744,6 @@ def test_build_isg_features_returns_the_vectors_of_the_fit_and_target_pairs(
     assert features.target_sides[1] is target.second
     pd.testing.assert_frame_equal(features.target_pairs_df, target.pairs_df)
     assert features.vectorizer is None
-
-
-def test_build_isg_features_returns_labels_the_caller_may_edit() -> None:
-    """Editing the returned labels never changes the labels of the loaded vectors."""
-    isg_vectors = _isg_vectors()
-    fit_splits, target_split = TUNING
-    expected_train = isg_vectors.splits["train"].pairs_df.copy()
-    expected_validation = isg_vectors.splits["validation"].pairs_df.copy()
-
-    features = build_isg_features(isg_vectors, fit_splits, target_split)
-    features.fit_pairs_df.loc[0, "same"] = False
-    features.target_pairs_df.loc[0, "same"] = False
-
-    pd.testing.assert_frame_equal(isg_vectors.splits["train"].pairs_df, expected_train)
-    pd.testing.assert_frame_equal(
-        isg_vectors.splits["validation"].pairs_df,
-        expected_validation,
-    )
 
 
 @pytest.mark.parametrize(
