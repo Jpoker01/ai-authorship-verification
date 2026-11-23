@@ -57,7 +57,7 @@ def _settings_as_text(settings: Mapping[str, object]) -> dict[str, str]:
 
 
 def _read_stored_settings(study_path: Path) -> Mapping[str, str] | None:
-    """Return the settings stored in the study file; the file is only read.
+    """Return the settings stored in the study file; only a killed write is rolled back.
 
     Args:
         study_path: SQLite file of the study; its stem is the study name.
@@ -113,7 +113,7 @@ def _list_changes(stored: Mapping[str, str], current: Mapping[str, str]) -> list
 
 
 def check_study_settings(study_path: Path, settings: Mapping[str, object]) -> None:
-    """Stop when the study file was started with other settings; the file is only read.
+    """Stop when the study file was started with other settings; only a killed write is undone.
 
     Args:
         study_path: SQLite file of the study; its stem is the study name.
