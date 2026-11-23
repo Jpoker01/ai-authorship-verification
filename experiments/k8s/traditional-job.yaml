@@ -1,9 +1,9 @@
 # Template of ONE Job of a traditional notebook (word BoW / TF-IDF) on CERIT: CPU only, one CPU type
-# (AMD EPYC 9454), the dt home PVC, the launch checkout with its own venv and kernel. A replaced pod runs
-# the notebook from the top again and the notebook resumes from its study.
+# (AMD EPYC 9454), the home PVC of the hub server, the launch checkout with its own venv and kernel.
+# A replaced pod runs the notebook from the top again and the notebook resumes from its study.
 # NOT applied as it is - make_traditional_jobs.py fills the {{...}} fields and writes one manifest per run
 # into a new folder below the git-ignored experiments/outputs; check its manifests.sha256, then apply the
-# manifests from a terminal on the dt hub server, in the launch checkout:
+# manifests from a terminal on that hub server, in the launch checkout:
 #   bash experiments/k8s/launch.sh <generated manifests>
 apiVersion: batch/v1
 kind: Job
@@ -81,7 +81,7 @@ spec:
             - name: OPENBLAS_NUM_THREADS
               value: "{{OMP_THREADS}}"
             - name: REPO
-              value: /home/jovyan/launch/v2-launch-3-traditional
+              value: "{{REPO}}"
             - name: JUPYTER_PREFER_ENV_PATH
               value: "1"
             - name: LAUNCH_TAG
@@ -220,4 +220,4 @@ spec:
       volumes:
         - name: home
           persistentVolumeClaim:
-            claimName: xpokor17-home-jupyter-xpokor17--dt  # the home of dt
+            claimName: "{{HOME_CLAIM}}"

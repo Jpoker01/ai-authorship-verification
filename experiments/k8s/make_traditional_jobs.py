@@ -2,11 +2,16 @@
 
 The manifests go into a new folder below the git-ignored experiments/outputs, numbered in the order
 they are applied (the longest runs first), with a sha256 list that is checked right before the apply.
+Run it from a launch checkout inside the home of the hub server; the Jobs mount that home and run
+the checkout the generator ran from.
 
 Usage (in the launch checkout, experiments folder):
-    .venv/bin/python k8s/make_traditional_jobs.py --launch-tag v2-launch-3-traditional outputs/k8s/launch
-    .venv/bin/python k8s/make_traditional_jobs.py --smoke g1 outputs/k8s/smoke-g1
-    .venv/bin/python k8s/make_traditional_jobs.py --launch-tag ... --memory trad-tfidf-absdiff-xgb=160Gi outputs/k8s/retry-1
+    .venv/bin/python k8s/make_traditional_jobs.py --home-claim <pvc> --launch-tag <tag> outputs/k8s/launch
+    .venv/bin/python k8s/make_traditional_jobs.py --home-claim <pvc> --smoke g1 outputs/k8s/smoke-g1
+    .venv/bin/python k8s/make_traditional_jobs.py ... --memory trad-tfidf-absdiff-xgb=160Gi outputs/k8s/retry-1
+
+The home PVC is the claim whose volume appears in "df ~":
+    kubectl get pvc -o custom-columns=NAME:.metadata.name,VOLUME:.spec.volumeName
 """
 
 import argparse
@@ -21,6 +26,9 @@ from pathlib import Path
 from avcore.classifiers import THREADED_CLASSIFIERS
 
 K8S_DIR = Path(__file__).resolve().parent
+REPO_DIR = K8S_DIR.parents[1]
+# the mountPath of the home in traditional-job.yaml
+POD_HOME = Path("/home/jovyan")
 OUTPUTS_DIR = K8S_DIR.parent / "outputs"
 TEMPLATE_PATH = K8S_DIR / "traditional-job.yaml"
 PAIRWISE_NOTEBOOK = "traditional/bow_tfidf_pairwise_classification.ipynb"
@@ -53,6 +61,8 @@ SMOKE_TRIALS = 4
 PLACEHOLDER = re.compile(r"\{\{[A-Z_]+\}\}")
 # a Kubernetes Job name - lowercase letters, digits and "-", at most 63 characters
 JOB_NAME_PATTERN = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+# a Kubernetes PVC name - lowercase letters, digits, "-" and ".", at most 253 characters
+CLAIM_NAME_PATTERN = re.compile(r"^[a-z0-9]([-.a-z0-9]{0,251}[a-z0-9])?$")
 
 
 @dataclass
@@ -180,21 +190,22 @@ def apply_memory_overrides(runs: list[Run], overrides: list[str]) -> None:
         runs_by_name[job_name].memory = memory
 
 
-def render(template: str, run: Run, launch_tag: str) -> str:
+def render(template: str, run: Run, shared_fields: dict[str, str]) -> str:
     """Return the manifest of one run - the template with every {{...}} field filled.
+
+    Args:
+        shared_fields: The fields equal in every manifest of one generator run.
 
     Raises:
         SystemExit: If a {{...}} field is left unfilled.
     """
     fields = {
+        **shared_fields,
         "{{JOB_NAME}}": run.job_name,
         "{{CPU}}": str(run.cpu),
         "{{OMP_THREADS}}": str(run.omp_threads),
         "{{MEMORY}}": run.memory,
-        "{{LAUNCH_TAG}}": launch_tag,
         "{{NOTEBOOK}}": run.notebook,
-        "{{PARAMS_JSON}}": json.dumps(run.params),
-        "{{MIN_FREE_GB}}": str(run.min_free_gb),
     }
     manifest = template
     for field, value in fields.items():
@@ -236,10 +247,22 @@ def current_commit() -> str:
     return result.stdout.strip()
 
 
+def pod_repo_path() -> str:
+    """Return the path of this checkout inside the Job pods, which mount the home at POD_HOME.
+
+    Raises:
+        SystemExit: If the checkout is outside the home, which the Jobs can not see.
+    """
+    home = Path.home().resolve()
+    if not REPO_DIR.is_relative_to(home):
+        sys.exit(f"{REPO_DIR} is outside {home}, the home the Jobs mount")
+    return str(POD_HOME / REPO_DIR.relative_to(home))
+
+
 def write_manifests(
     runs: list[Run],
     template: str,
-    launch_tag: str,
+    shared_fields: dict[str, str],
     out_dir: Path,
 ) -> None:
     """Write the numbered manifests and their sha256 list into a new folder.
@@ -255,7 +278,7 @@ def write_manifests(
     hash_lines = []
     for position, run in enumerate(runs, start=1):
         path = out_dir / f"{position:02d}-{run.job_name}.yaml"
-        manifest = render(template, run, launch_tag)
+        manifest = render(template, run, shared_fields)
         path.write_text(manifest, encoding="utf-8")
         digest = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
         hash_lines.append(f"{digest}  {path.name}\n")
@@ -276,6 +299,11 @@ def main() -> None:
         help="a smoke round; the commit is added to RUN_TAG",
     )
     parser.add_argument(
+        "--home-claim",
+        required=True,
+        help="the PVC of the hub server's home, mounted by every Job",
+    )
+    parser.add_argument(
         "--memory",
         action="append",
         default=[],
@@ -292,6 +320,8 @@ def main() -> None:
         sys.exit(
             f"out_dir has to be below {OUTPUTS_DIR} - git ignores only that folder",
         )
+    if not CLAIM_NAME_PATTERN.fullmatch(args.home_claim):
+        sys.exit(f"{args.home_claim!r} is not a valid PVC name")
     smoke_tag = ""
     if args.smoke:
         smoke_tag = f"{args.smoke}-{current_commit()}"
@@ -301,11 +331,16 @@ def main() -> None:
     runs = build_runs(smoke_tag)
     check_runs(runs)
     apply_memory_overrides(runs, args.memory)
+    shared_fields = {
+        "{{LAUNCH_TAG}}": launch_tag,
+        "{{HOME_CLAIM}}": args.home_claim,
+        "{{REPO}}": pod_repo_path(),
+    }
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     write_manifests(
         runs=runs,
         template=template,
-        launch_tag=launch_tag,
+        shared_fields=shared_fields,
         out_dir=args.out_dir,
     )
     print(f"{len(runs)} manifests in {args.out_dir}")
