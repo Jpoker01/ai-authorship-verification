@@ -349,3 +349,30 @@ def _sources(context: RunContext, data_names: Sequence[str]) -> dict[str, str]:
             raise ValueError(f"The run context has no {key}.")
         sources[key] = context.environment[key]
     return sources
+
+
+def _check_data_files(
+    cleaned_paths: Mapping[str, Path],
+    sources: Mapping[str, str],
+) -> None:
+    """Raise ValueError unless every cleaned file is the file the run context hashed."""
+    for path in cleaned_paths.values():
+        if _sha256(path) != sources[f"data_sha256.{path.name}"]:
+            raise ValueError(f"{path} is not the file the run context hashed.")
+
+
+def _check_new_folder(vectors_dir: Path) -> Path:
+    """Return the .partial folder next to vectors_dir after checking that neither exists.
+
+    Raises:
+        ValueError: If vectors_dir is relative.
+        FileExistsError: If vectors_dir or vectors_dir.partial already exists.
+    """
+    if not vectors_dir.is_absolute():
+        raise ValueError(f"Folder {vectors_dir} has to be absolute.")
+    # vectors are first written to .partial folder
+    partial_dir = vectors_dir.with_name(f"{vectors_dir.name}.partial")
+    for folder in (vectors_dir, partial_dir):
+        if folder.exists():
+            raise FileExistsError(folder)
+    return partial_dir
