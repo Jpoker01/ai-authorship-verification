@@ -206,6 +206,8 @@ def render(template: str, run: Run, shared_fields: dict[str, str]) -> str:
         "{{OMP_THREADS}}": str(run.omp_threads),
         "{{MEMORY}}": run.memory,
         "{{NOTEBOOK}}": run.notebook,
+        "{{PARAMS_JSON}}": json.dumps(run.params),
+        "{{MIN_FREE_GB}}": str(run.min_free_gb),
     }
     manifest = template
     for field, value in fields.items():
