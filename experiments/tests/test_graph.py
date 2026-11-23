@@ -5,6 +5,7 @@ import sys
 from collections import Counter
 from collections.abc import Iterator
 from concurrent.futures import Executor, ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 
 import networkx as nx
@@ -161,15 +162,24 @@ def _word_counts(text: str) -> Counter[str]:
     return features
 
 
+class RecordingPool(ThreadPoolExecutor):
+    """One-thread pool that records when it starts and how it is shut down."""
+
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(max_workers=1)
+        self.events = events
+        events.append("start")
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        self.events.append(f"shutdown wait={wait}")
+        super().shutdown(wait=wait, cancel_futures=cancel_futures)
+
+
 @pytest.fixture
 def fake_build(monkeypatch: pytest.MonkeyPatch) -> None:
     """build_isg_vectors without spaCy: threads instead of processes, a word count as features."""
 
-    def thread_pool(
-        max_workers: int,
-        mp_context: object,
-        max_tasks_per_child: int,
-    ) -> Executor:
+    def thread_pool(max_workers: int, mp_context: object) -> Executor:
         return ThreadPoolExecutor(max_workers)
 
     monkeypatch.setattr(graph, "ProcessPoolExecutor", thread_pool)
@@ -302,9 +312,10 @@ def test_iter_isg_features_keeps_the_order_of_the_texts_across_batches(
     monkeypatch.setattr(graph, "BATCH_SIZE", 3)
     monkeypatch.setattr(graph, "CHUNK_SIZE", 2)
     monkeypatch.setattr(graph, "extract_isg_features", lambda text: Counter([text]))
+    make_pool = partial(ThreadPoolExecutor, max_workers=2)
+    batches_per_pool = 2
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        all_features = list(_iter_isg_features(executor, texts))
+    all_features = list(_iter_isg_features(make_pool, batches_per_pool, texts))
 
     assert all_features == [Counter([text]) for text in texts]
 
@@ -322,12 +333,32 @@ def test_iter_isg_features_reads_only_one_batch_ahead(
 
     monkeypatch.setattr(graph, "BATCH_SIZE", 3)
     monkeypatch.setattr(graph, "extract_isg_features", lambda text: Counter([text]))
+    make_pool = partial(ThreadPoolExecutor, max_workers=2)
+    batches_per_pool = 2
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        all_features = _iter_isg_features(executor, read_texts())
-        next(all_features)
+    all_features = _iter_isg_features(make_pool, batches_per_pool, read_texts())
+    next(all_features)
+    all_features.close()
 
     assert len(texts_read) == 3
+
+
+def test_iter_isg_features_replaces_the_pool_after_batches_per_pool_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """7 batches with 3 batches per pool start 3 pools, each after the last one was shut down."""
+    texts = []
+    for index in range(7):
+        texts.append(f"text{index}")
+    events: list[str] = []
+    make_pool = partial(RecordingPool, events)
+    monkeypatch.setattr(graph, "BATCH_SIZE", 1)
+    monkeypatch.setattr(graph, "extract_isg_features", _word_counts)
+    batches_per_pool = 3
+
+    list(_iter_isg_features(make_pool, batches_per_pool, texts))
+
+    assert events == ["start", "shutdown wait=True"] * 3
 
 
 def test_to_matrix_numbers_the_columns_as_the_features_first_appear() -> None:
@@ -541,6 +572,31 @@ def test_build_isg_vectors_reports_progress_after_every_batch(
 
 
 @pytest.mark.usefixtures("fake_build")
+def test_build_isg_vectors_replaces_the_pool_after_texts_per_worker_texts(
+    small_paths: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One worker, 2 texts per worker and 1 text per batch start 2 + 1 + 1 pools for 4 + 2 + 2 texts."""
+    vectors_dir = tmp_path / "isg"
+    context = _context_of(small_paths)
+    workers = 1
+    pools_started = []
+
+    def thread_pool(max_workers: int, mp_context: object) -> Executor:
+        pools_started.append(max_workers)
+        return ThreadPoolExecutor(max_workers)
+
+    monkeypatch.setattr(graph, "ProcessPoolExecutor", thread_pool)
+    monkeypatch.setattr(graph, "BATCH_SIZE", 1)
+    monkeypatch.setattr(graph, "TEXTS_PER_WORKER", 2)
+
+    build_isg_vectors(small_paths, vectors_dir, context, workers=workers)
+
+    assert pools_started == [1, 1, 1, 1]
+
+
+@pytest.mark.usefixtures("fake_build")
 def test_build_isg_vectors_records_the_build_run_and_the_nltk_data(
     small_paths: dict[str, Path],
     tmp_path: Path,
@@ -632,6 +688,7 @@ def test_build_isg_vectors_gives_the_same_vectors_in_every_run(
 
     monkeypatch.setattr(graph, "CHUNK_SIZE", 1)
     monkeypatch.setattr(graph, "BATCH_SIZE", 3)
+    monkeypatch.setattr(graph, "TEXTS_PER_WORKER", 1)
     build_isg_vectors(real_text_paths, first_dir, context, workers=two_workers)
     monkeypatch.undo()
     build_isg_vectors(real_text_paths, second_dir, context, workers=one_worker)
