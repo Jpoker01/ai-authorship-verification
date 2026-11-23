@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from concurrent.futures import Executor, ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -577,7 +577,7 @@ def test_build_isg_vectors_replaces_the_pool_after_texts_per_worker_texts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One worker, 2 texts per worker and 1 text per batch start 2 + 1 + 1 pools for 4 + 2 + 2 texts."""
+    """Two workers, 1 text per worker and 1 text per batch start 2 + 1 + 1 pools for 4 + 2 + 2 texts."""
     vectors_dir = tmp_path / "isg"
     context = _context_of(small_paths)
     workers = 1
@@ -589,11 +589,45 @@ def test_build_isg_vectors_replaces_the_pool_after_texts_per_worker_texts(
 
     monkeypatch.setattr(graph, "ProcessPoolExecutor", thread_pool)
     monkeypatch.setattr(graph, "BATCH_SIZE", 1)
-    monkeypatch.setattr(graph, "TEXTS_PER_WORKER", 2)
+    monkeypatch.setattr(graph, "TEXTS_PER_WORKER", 1)
 
     build_isg_vectors(small_paths, vectors_dir, context, workers=workers)
 
-    assert pools_started == [1, 1, 1, 1]
+    assert pools_started == [2, 2, 2, 2]
+
+
+@pytest.mark.usefixtures("fake_build")
+def test_build_isg_vectors_shuts_the_pool_down_when_the_build_fails(
+    small_paths: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure while the training matrix is built still shuts the open pool down."""
+    vectors_dir = tmp_path / "isg"
+    context = _context_of(small_paths)
+    events: list[str] = []
+
+    def recording_pool(max_workers: int, mp_context: object) -> Executor:
+        return RecordingPool(events)
+
+    def failing_matrix(
+        all_features: Iterable[Counter[str]],
+        columns: dict[str, int],
+        *,
+        add_columns: bool,
+    ) -> sp.csr_matrix:
+        next(iter(all_features))
+        raise RuntimeError("matrix failed")
+
+    monkeypatch.setattr(graph, "ProcessPoolExecutor", recording_pool)
+    monkeypatch.setattr(graph, "_to_matrix", failing_matrix)
+
+    # failure keeps the traceback and its frames alive, as a notebook kernel does
+    with pytest.raises(RuntimeError) as failure:
+        build_isg_vectors(small_paths, vectors_dir, context, workers=1)
+
+    assert str(failure.value) == "matrix failed"
+    assert events == ["start", "shutdown wait=True"]
 
 
 @pytest.mark.usefixtures("fake_build")
@@ -604,7 +638,7 @@ def test_build_isg_vectors_records_the_build_run_and_the_nltk_data(
     """The manifest keeps the context of the build and the hashes of the NLTK data."""
     vectors_dir = tmp_path / "isg"
     context = _context_of(small_paths)
-    workers = 1
+    workers = 2
     expected_built_with = {
         "context": context.environment,
         "nltk_data": {"corpora/wordnet.zip": "d" * 64},
@@ -679,7 +713,7 @@ def test_build_isg_vectors_gives_the_same_vectors_in_every_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two workers with one text per chunk give what one worker with large chunks gives."""
+    """Two workers with one text per chunk and a new pool per batch give what one worker gives."""
     first_dir = tmp_path / "isg_1"
     second_dir = tmp_path / "isg_2"
     context = _context_of(real_text_paths)
