@@ -171,7 +171,11 @@ def apply_memory_overrides(runs: list[Run], overrides: list[str]) -> None:
 
 
 def render(template: str, run: Run, launch_tag: str) -> str:
-    """Return the manifest of one run - the template with every {{...}} field filled."""
+    """Return the manifest of one run - the template with every {{...}} field filled.
+
+    Raises:
+        SystemExit: If a {{...}} field is left unfilled.
+    """
     fields = {
         "{{JOB_NAME}}": run.job_name,
         "{{CPU}}": str(run.cpu),
@@ -206,7 +210,11 @@ def check_runs(runs: list[Run]) -> None:
 
 
 def check_threaded_classifiers() -> None:
-    """Refuse a THREADED_CLASSIFIERS list that differs from the one of avcore.classifiers."""
+    """Refuse a THREADED_CLASSIFIERS list that differs from the one of avcore.classifiers.
+
+    Raises:
+        SystemExit: If the two lists differ.
+    """
     from avcore import classifiers
 
     if sorted(THREADED_CLASSIFIERS) != sorted(classifiers.THREADED_CLASSIFIERS):
@@ -216,7 +224,11 @@ def check_threaded_classifiers() -> None:
 
 
 def current_commit() -> str:
-    """Return the short hash of the commit the generator runs from."""
+    """Return the short hash of the commit the generator runs from.
+
+    Raises:
+        subprocess.CalledProcessError: If git fails, e.g. outside a git checkout.
+    """
     result = subprocess.run(
         ["git", "rev-parse", "--short=7", "HEAD"],
         cwd=K8S_DIR,

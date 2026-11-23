@@ -2,7 +2,8 @@
 # (AMD EPYC 9454), the dt home PVC, the launch checkout with its own venv and kernel. A replaced pod runs
 # the notebook from the top again and the notebook resumes from its study.
 # NOT applied as it is - make_traditional_jobs.py fills the {{...}} fields and writes one manifest per run
-# outside the repo; apply those from a terminal on the dt hub server, in the launch checkout:
+# into a new folder below the git-ignored experiments/outputs; check its manifests.sha256, then apply the
+# manifests from a terminal on the dt hub server, in the launch checkout:
 #   bash experiments/k8s/launch.sh <generated manifests>
 apiVersion: batch/v1
 kind: Job
@@ -116,18 +117,22 @@ spec:
               '
               cpu_check='
               import os, sys
+              import scipy.linalg, sklearn.neighbors, xgboost
               from numpy.core._multiarray_umath import __cpu_dispatch__, __cpu_features__
               from threadpoolctl import threadpool_info
               found = " ".join(name for name in __cpu_dispatch__ if __cpu_features__[name])
               print("simd=" + found)
-              print("blas=", [(pool.get("internal_api"), pool.get("architecture"), pool.get("num_threads")) for pool in threadpool_info()])
+              for pool in threadpool_info():
+                  print("threads:", pool["internal_api"], pool["num_threads"], pool["filepath"])
               sys.exit(0 if found == os.environ["EXPECTED_CPU_SIMD"] else 1)
               '
               params_check='
               import ast, json, os, sys
               import papermill
               def refuse_duplicates(pairs):
-                  keys = [key for key, _ in pairs]
+                  keys = []
+                  for key, _ in pairs:
+                      keys.append(key)
                   if len(keys) != len(set(keys)):
                       sys.exit(f"duplicate key in PARAMS_YAML: {keys}")
                   return dict(pairs)
