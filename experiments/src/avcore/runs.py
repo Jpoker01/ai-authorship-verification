@@ -4,6 +4,7 @@ import json
 import shutil
 import sqlite3
 from collections.abc import Mapping
+from contextlib import closing
 from pathlib import Path
 
 import optuna
@@ -50,7 +51,7 @@ def _settings_as_text(settings: Mapping[str, object]) -> dict[str, str]:
             is_stable = _is_plain(value)
         if not is_stable:
             raise TypeError(
-                f"Setting {key} has a value whose text is not stable: {value!r}."
+                f"Setting {key} has a value whose text is not stable: {value!r}.",
             )
     return {key: str(value) for key, value in settings.items()}
 
@@ -70,6 +71,10 @@ def _read_stored_settings(study_path: Path) -> Mapping[str, str] | None:
     """
     if not study_path.is_file() or study_path.stat().st_size == 0:
         return None
+    # a run killed during a write leaves a hot journal that only a writable connection
+    # rolls back; reading the schema does that and writes nothing else
+    with closing(sqlite3.connect(study_path)) as connection:
+        connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
     # read-only, so Optuna can not create or migrate tables in the file; as_uri gives
     # the SQLite URI form also for a Windows path (forward slashes, /C:/...)
     read_only_uri = f"{study_path.as_uri()}?mode=ro"
@@ -85,7 +90,7 @@ def _read_stored_settings(study_path: Path) -> Mapping[str, str] | None:
     stored_settings = stored_study.user_attrs.get(STUDY_SETTINGS_ATTR)
     if stored_settings is None and stored_study.get_trials(deepcopy=False):
         raise RuntimeError(
-            f"Study {study_path.stem} holds trials but no settings - move it away."
+            f"Study {study_path.stem} holds trials but no settings - move it away.",
         )
     return stored_settings
 
@@ -126,7 +131,7 @@ def check_study_settings(study_path: Path, settings: Mapping[str, object]) -> No
     if changes:
         raise RuntimeError(
             f"Study {study_path.stem} was started with other settings - "
-            f"{'; '.join(changes)}. Move the study away or use another run name."
+            f"{'; '.join(changes)}. Move the study away or use another run name.",
         )
 
 
@@ -185,10 +190,11 @@ def sum_training_seconds(study: optuna.Study, seconds_attr: str) -> float:
     ]
     if not any(seconds_attr in trial.user_attrs for trial in counted_trials):
         raise ValueError(
-            f"Study {study.study_name} holds no trial with {seconds_attr}."
+            f"Study {study.study_name} holds no trial with {seconds_attr}.",
         )
     return sum(
-        (trial.user_attrs.get(seconds_attr, 0.0) for trial in counted_trials), start=0.0
+        (trial.user_attrs.get(seconds_attr, 0.0) for trial in counted_trials),
+        start=0.0,
     )
 
 
@@ -220,7 +226,7 @@ def find_finished_run(run_dir: Path, params: Mapping[str, object]) -> bool:
     if changes:
         raise RuntimeError(
             f"{run_dir} holds the results of other settings - {'; '.join(changes)}. "
-            "Move it away."
+            "Move it away.",
         )
     return True
 
@@ -237,7 +243,9 @@ def remove_unfinished_run_dir(run_dir: Path) -> None:
 
 
 def build_predictions(
-    pairs_df: pd.DataFrame, scores_df: pd.DataFrame, threshold: float
+    pairs_df: pd.DataFrame,
+    scores_df: pd.DataFrame,
+    threshold: float,
 ) -> pd.DataFrame:
     """Return the prediction table of every pair - same author when score >= threshold.
 
@@ -259,7 +267,7 @@ def build_predictions(
         raise ValueError("The scores do not hold every pair once, in the same order.")
     if scores_df["score"].isna().any():
         raise ValueError(
-            "A score is NaN - it would be predicted as a different author."
+            "A score is NaN - it would be predicted as a different author.",
         )
     return pd.DataFrame(
         {
@@ -267,5 +275,5 @@ def build_predictions(
             "same": scores_df["same"].astype(int),
             "score": scores_df["score"],
             "pred": (scores_df["score"] >= threshold).astype(int),
-        }
+        },
     )

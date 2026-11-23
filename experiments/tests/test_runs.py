@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -355,6 +356,41 @@ def test_check_study_settings_rejects_trials_without_settings(tmp_path: Path) ->
     study.ask()
     with pytest.raises(RuntimeError, match="holds trials but no settings"):
         runs.check_study_settings(study_path, settings)
+
+
+def test_check_study_settings_rolls_back_the_journal_of_a_killed_write(
+    tmp_path: Path,
+) -> None:
+    """A run killed in the middle of a study write can start again; the write is undone."""
+    written_path = tmp_path / "optuna_study_killed.db"
+    study_path = tmp_path / "copy" / "optuna_study_killed.db"
+    settings = {"n_trials": 12}
+    n_uncommitted_rows = 2_000
+    study = tuning.open_study(written_path, seed=SEED)
+    runs.store_study_settings(study, settings)
+    connection = sqlite3.connect(written_path)
+    # a cache of one page writes the change into the file before the commit
+    connection.execute("PRAGMA cache_size=1")
+    connection.execute("BEGIN")
+    for number in range(n_uncommitted_rows):
+        connection.execute(
+            "INSERT INTO study_user_attributes (study_id, key, value_json) "
+            "VALUES (1, ?, '0')",
+            (f"uncommitted_{number}",),
+        )
+    # copied now, the two files are what a run killed before the commit leaves behind
+    study_path.parent.mkdir()
+    shutil.copyfile(written_path, study_path)
+    shutil.copyfile(f"{written_path}-journal", f"{study_path}-journal")
+    connection.rollback()
+    connection.close()
+    runs.check_study_settings(study_path, settings)
+    loaded = optuna.load_study(
+        study_name=study_path.stem,
+        storage=f"sqlite:///{study_path}",
+    )
+    assert sorted(loaded.user_attrs) == ["seed", runs.STUDY_SETTINGS_ATTR]
+    assert not Path(f"{study_path}-journal").exists()
 
 
 def test_check_study_settings_passes_for_a_study_without_trials_and_settings(
