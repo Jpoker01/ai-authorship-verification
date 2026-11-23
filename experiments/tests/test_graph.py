@@ -768,6 +768,11 @@ def test_load_isg_vectors_refuses_a_side_of_another_shape(
         first=sides["first"],
         second=sides["second"],
     )
+    sources = _sources(CONTEXT)
+    _write_isg_vectors(vectors_dir, isg_vectors, sources, BUILT_WITH)
+
+    with pytest.raises(ValueError, match="test has a side of shape"):
+        load_isg_vectors(vectors_dir, CONTEXT)
 
 
 @pytest.mark.parametrize(("fit_splits", "target_split"), [TUNING, FINAL, HELD_OUT])
