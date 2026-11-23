@@ -13,7 +13,8 @@ from array import array
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import Executor, ProcessPoolExecutor
-from functools import lru_cache
+from contextlib import closing
+from functools import lru_cache, partial
 from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -55,8 +56,8 @@ CHUNK_SIZE = 16
 # texts sent to the workers per round, so the texts of a split are never all in memory
 BATCH_SIZE = 4_096
 TEXT2GRAPHAPI_LOGGERS = ["IntegratedSyntacticGraph", "Preprocessing", "Utils"]
-# a worker is replaced after this many chunks, so the memory of its caches stays bounded
-CHUNKS_PER_WORKER = 250
+# texts a worker builds on average before its pool is replaced, so its cache memory stays bounded
+TEXTS_PER_WORKER = 4_000
 COLUMNS_FILE = "columns.json"
 MANIFEST_FILE = "manifest.json"
 # NLTK data outside uv.lock decides tokens and synonyms, so the manifest records its hash
@@ -184,7 +185,8 @@ def _iter_text_batches(texts: Iterable[str]) -> Iterator[list[str]]:
 
 
 def _iter_isg_features(
-    executor: Executor,
+    make_pool: Callable[[], Executor],
+    batches_per_pool: int,
     texts: Iterable[str],
     on_batch: Callable[[int], None] | None = None,
 ) -> Iterator[Counter[str]]:
@@ -194,19 +196,30 @@ def _iter_isg_features(
     the caller has taken the features of every text of the current one.
 
     Args:
-        executor: Pool of workers that build the graphs.
+        make_pool: Returns a new pool of workers that build the graphs.
+        batches_per_pool: Batches a pool builds before it is shut down and replaced.
         texts: Texts of one split.
         on_batch: Called after every batch with the number of texts done so far.
     """
     texts_done = 0
-    for batch in _iter_text_batches(texts):
-        # map returns the features in the order of the batch, whichever worker finishes first
-        batch_features = executor.map(extract_isg_features, batch, chunksize=CHUNK_SIZE)
-        # hands the caller one text at a time and pauses until it asks for the next one
-        yield from batch_features
-        texts_done += len(batch)
-        if on_batch is not None:
-            on_batch(texts_done)
+    pool = None
+    try:
+        for batch_number, batch in enumerate(_iter_text_batches(texts)):
+            # a new pool instead of max_tasks_per_child, which can hang on Python 3.11
+            if batch_number % batches_per_pool == 0:
+                if pool is not None:
+                    pool.shutdown()
+                pool = make_pool()
+            # map returns the features in the order of the batch, whichever worker finishes first
+            batch_features = pool.map(extract_isg_features, batch, chunksize=CHUNK_SIZE)
+            # hands the caller one text at a time and pauses until it asks for the next one
+            yield from batch_features
+            texts_done += len(batch)
+            if on_batch is not None:
+                on_batch(texts_done)
+    finally:
+        if pool is not None:
+            pool.shutdown()
 
 
 def _add_new_columns(features: Mapping[str, int], columns: dict[str, int]) -> None:
@@ -381,7 +394,8 @@ def _check_new_folder(vectors_dir: Path) -> Path:
 
 
 def _build_split(
-    executor: Executor,
+    make_pool: Callable[[], Executor],
+    batches_per_pool: int,
     name: str,
     cleaned_path: Path,
     columns: dict[str, int],
@@ -396,13 +410,17 @@ def _build_split(
         if on_progress is not None:
             on_progress(split=name, texts_done=texts_done, texts_total=texts_total)
 
-    all_features = tqdm(
-        _iter_isg_features(executor, texts, on_batch=report),
-        total=texts_total,
-        desc=f"ISG {name}",
+    isg_features = _iter_isg_features(
+        make_pool=make_pool,
+        batches_per_pool=batches_per_pool,
+        texts=texts,
+        on_batch=report,
     )
-    # only the training texts add new columns
-    vectors = _to_matrix(all_features, columns, add_columns=name == "train")
+    # closing shuts the pool down also when building the matrix fails
+    with closing(isg_features):
+        all_features = tqdm(isg_features, total=texts_total, desc=f"ISG {name}")
+        # only the training texts add new columns
+        vectors = _to_matrix(all_features, columns, add_columns=name == "train")
     return split_sides(pairs_df, vectors)
 
 
@@ -495,20 +513,18 @@ def build_isg_vectors(
     splits = {}
     # spawn: every worker is a new Python process that inherits PYTHONHASHSEED from this one
     mp_context = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=mp_context,
-        max_tasks_per_child=CHUNKS_PER_WORKER,
-    ) as executor:
-        # SPLITS starts with train, so the training texts decide the columns
-        for name in SPLITS:
-            splits[name] = _build_split(
-                executor,
-                name,
-                cleaned_paths[name],
-                columns,
-                on_progress,
-            )
+    make_pool = partial(ProcessPoolExecutor, max_workers=workers, mp_context=mp_context)
+    batches_per_pool = max(1, TEXTS_PER_WORKER * workers // BATCH_SIZE)
+    # SPLITS starts with train, so the training texts decide the columns
+    for name in SPLITS:
+        splits[name] = _build_split(
+            make_pool=make_pool,
+            batches_per_pool=batches_per_pool,
+            name=name,
+            cleaned_path=cleaned_paths[name],
+            columns=columns,
+            on_progress=on_progress,
+        )
 
     isg_vectors = PairMatrices(
         columns=list(columns),
