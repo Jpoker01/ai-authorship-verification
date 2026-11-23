@@ -376,3 +376,73 @@ def _check_new_folder(vectors_dir: Path) -> Path:
         if folder.exists():
             raise FileExistsError(folder)
     return partial_dir
+
+
+def _build_split(
+    executor: Executor,
+    name: str,
+    cleaned_path: Path,
+    columns: dict[str, int],
+    on_progress: Callable[..., None] | None,
+) -> SplitMatrices:
+    """Build the vectors of both texts of every pair of one split."""
+    pairs_df = read_pair_labels(cleaned_path)
+    texts = iter_pair_texts(cleaned_path)
+    texts_total = 2 * len(pairs_df)
+
+    def report(texts_done: int) -> None:
+        if on_progress is not None:
+            on_progress(split=name, texts_done=texts_done, texts_total=texts_total)
+
+    all_features = tqdm(
+        _iter_isg_features(executor, texts, on_batch=report),
+        total=texts_total,
+        desc=f"ISG {name}",
+    )
+    # only the training texts add new columns
+    vectors = _to_matrix(all_features, columns, add_columns=name == "train")
+    return split_sides(pairs_df, vectors)
+
+
+def _write_isg_vectors(
+    vectors_dir: Path,
+    isg_vectors: PairMatrices,
+    sources: Mapping[str, str],
+    built_with: Mapping[str, object],
+) -> None:
+    """Write the vectors into vectors_dir.partial with a manifest, then rename it to vectors_dir.
+
+    The manifest holds the sources load_isg_vectors compares and built_with, the build run
+    and the NLTK data, which are only recorded.
+    """
+    partial_dir = _check_new_folder(vectors_dir)
+    partial_dir.mkdir(parents=True)
+    (partial_dir / COLUMNS_FILE).write_text(
+        json.dumps(isg_vectors.columns),
+        encoding="utf-8",
+    )
+    for name, split in isg_vectors.splits.items():
+        pairs = {}
+        for column in PAIRS_COLUMNS:
+            pairs[column] = split.pairs_df[column].tolist()
+        (partial_dir / f"{name}_pairs.json").write_text(
+            json.dumps(pairs),
+            encoding="utf-8",
+        )
+        sp.save_npz(partial_dir / f"{name}_1.npz", split.first)
+        sp.save_npz(partial_dir / f"{name}_2.npz", split.second)
+
+    files = {}
+    for path in sorted(partial_dir.iterdir()):
+        files[path.name] = _sha256(path)
+    manifest = {
+        "settings": isg_vectors.settings,
+        "sources": dict(sources),
+        "built_with": dict(built_with),
+        "files": files,
+    }
+    (partial_dir / MANIFEST_FILE).write_text(
+        json.dumps(manifest, indent=2),
+        encoding="utf-8",
+    )
+    partial_dir.rename(vectors_dir)
