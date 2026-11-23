@@ -168,7 +168,7 @@ def fake_build(monkeypatch: pytest.MonkeyPatch) -> None:
     def thread_pool(
         max_workers: int,
         mp_context: object,
-        max_chunks_per_worker: int,
+        max_tasks_per_child: int,
     ) -> Executor:
         return ThreadPoolExecutor(max_workers)
 
