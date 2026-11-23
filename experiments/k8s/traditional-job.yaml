@@ -1,0 +1,204 @@
+# Template of ONE Job of a traditional notebook (word BoW / TF-IDF) on CERIT: CPU only, one CPU type
+# (AMD EPYC 9454), the dt home PVC, the launch checkout with its own venv and kernel. A replaced pod runs
+# the notebook from the top again and the notebook resumes from its study.
+# NOT applied as it is - make_traditional_jobs.py fills the {{...}} fields and writes one manifest per run
+# outside the repo; apply those from a terminal on the dt hub server, in the launch checkout:
+#   bash experiments/k8s/launch.sh <generated manifests>
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{JOB_NAME}}"
+  labels:
+    app: dt-v2
+    family: traditional
+spec:
+  backoffLimit: 6
+  podReplacementPolicy: Failed
+  podFailurePolicy:
+    rules:
+      - action: FailJob # 64 = a start check refused the run
+        onExitCodes:
+          containerName: traditional
+          operator: In
+          values: [64]
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob # 137 = out of memory, the same trial would run out again
+        onExitCodes:
+          containerName: traditional
+          operator: In
+          values: [137]
+  ttlSecondsAfterFinished: 604800  # 7 days
+  template:
+    metadata:
+      labels:
+        app: dt-v2
+        family: traditional
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      affinity:
+        nodeAffinity: # one CPU type - numpy results depend on the SIMD extensions of the CPU
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: DoesNotExist
+                  - key: feature.node.kubernetes.io/cpu-cpuid.AVX512F
+                    operator: In
+                    values: [ "true" ]
+                  - key: feature.node.kubernetes.io/cpu-model.vendor_id
+                    operator: In
+                    values: [ "AMD" ]
+                  - key: feature.node.kubernetes.io/cpu-model.family
+                    operator: In
+                    values: [ "25" ]
+                  - key: feature.node.kubernetes.io/cpu-model.id
+                    operator: In
+                    values: [ "17" ]
+      securityContext: # required by the CERIT Pod Security Admission
+        runAsNonRoot: true
+        runAsUser: 1000           # jovyan:users in the CERIT images, the owner of the home
+        runAsGroup: 100
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: traditional
+          image: cerit.io/hubs/tensorflowgpu:2.17.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ "ALL" ]
+          env:
+            - name: HOME
+              value: /home/jovyan
+            - name: XDG_CACHE_HOME
+              value: /home/jovyan/.cache
+            - name: OMP_NUM_THREADS  # the node does not enforce the CPU limit
+              value: "{{CPU}}"
+            - name: OPENBLAS_NUM_THREADS  # = the CPU request
+              value: "{{CPU}}"
+            - name: REPO
+              value: /home/jovyan/launch/v2-launch-3-traditional
+            - name: JUPYTER_PREFER_ENV_PATH
+              value: "1"
+            - name: LAUNCH_TAG
+              value: "{{LAUNCH_TAG}}"
+            - name: NOTEBOOK
+              value: "{{NOTEBOOK}}"
+            - name: PARAMS_YAML
+              value: '{{PARAMS_JSON}}'
+            - name: EXPECTED_CPU_SIMD
+              value: SSSE3 SSE41 POPCNT SSE42 AVX F16C FMA3 AVX2 AVX512F AVX512CD AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL
+            - name: MIN_FREE_GB
+              value: "{{MIN_FREE_GB}}"
+            - name: SAMPLE_SECONDS
+              value: "60"
+          command: ["bash", "-c"]
+          args:
+            - |
+              repo="$REPO"
+              venv="$repo/experiments/.venv"
+              commit="$(git -C "$repo" rev-parse --short HEAD)" || exit 64
+              mkdir -p "$HOME/logs" || exit 64
+              run="$HOSTNAME-$commit"
+              exec > >(tee -a "$HOME/logs/$run.log") 2>&1
+              refuse() { echo "START REFUSED - $1"; exit 64; }
+              expected_data='
+              import json, sys
+              for name, sha256 in sorted(json.load(open(sys.argv[1]))["cleaned_sha256"].items()):
+                  print(sha256, name)
+              '
+              venv_list='
+              import importlib.metadata
+              print("\n".join(sorted(f"{d.name.lower()}=={d.version}" for d in importlib.metadata.distributions())))
+              '
+              cpu_check='
+              import os, sys
+              from numpy.core._multiarray_umath import __cpu_dispatch__, __cpu_features__
+              from threadpoolctl import threadpool_info
+              found = " ".join(name for name in __cpu_dispatch__ if __cpu_features__[name])
+              print("simd=" + found)
+              print("blas=", [(pool.get("internal_api"), pool.get("architecture"), pool.get("num_threads")) for pool in threadpool_info()])
+              sys.exit(0 if found == os.environ["EXPECTED_CPU_SIMD"] else 1)
+              '
+              params_check='
+              import ast, json, os, sys
+              import papermill
+              def refuse_duplicates(pairs):
+                  keys = [key for key, _ in pairs]
+                  if len(keys) != len(set(keys)):
+                      sys.exit(f"duplicate key in PARAMS_YAML: {keys}")
+                  return dict(pairs)
+              params = json.loads(os.environ["PARAMS_YAML"], object_pairs_hook=refuse_duplicates)
+              declared = papermill.inspect_notebook(sys.argv[1])
+              for name, value in params.items():
+                  if name not in declared:
+                      sys.exit(f"{name} is not a parameter of the notebook")
+                  default = ast.literal_eval(declared[name]["default"])
+                  if type(value) is not type(default):
+                      sys.exit(f"{name}={value!r} is not a {type(default).__name__}")
+              smoke = params.get("SMOKE", False)
+              run_tag = params.get("RUN_TAG", "")
+              if smoke and not run_tag:
+                  sys.exit("a smoke run needs a RUN_TAG")
+              if not smoke and (run_tag or not os.environ["LAUNCH_TAG"]):
+                  sys.exit("a full run needs a LAUNCH_TAG and no RUN_TAG")
+              print("params checked:", ", ".join(sorted(params)))
+              '
+              echo "pod=$HOSTNAME commit=$commit started=$(date -u +%Y-%m-%dT%H:%M:%SZ) repo=[$repo]"
+              lscpu | grep -E '^(Model name|CPU\(s\))'
+              echo "cpu.max=[$(cat /sys/fs/cgroup/cpu.max)] memory.max=[$(cat /sys/fs/cgroup/memory.max)] OMP_NUM_THREADS=[$OMP_NUM_THREADS]"
+              echo "NOTEBOOK=[$NOTEBOOK] PARAMS_YAML=[$PARAMS_YAML] LAUNCH_TAG=[$LAUNCH_TAG]"
+              cd "$repo/experiments" || refuse "the repository is missing"
+              status="$(git status --porcelain --untracked-files=all)" || refuse "git status failed"
+              status="$(printf '%s' "$status" | tr '\n' ' ')"
+              echo "status=[$status]"
+              echo "tag=[$(git tag --points-at HEAD | tr '\n' ' ')] describe=[$(git describe --tags --always)]"
+              echo "remote=[$(timeout 30 git ls-remote --tags origin 'v2-launch-*' | tr '\t\n' '  ')]"
+              echo "lock=$(sha256sum uv.lock | cut -c1-64)"
+              venv_packages="$("$venv/bin/python" -c "$venv_list")" || refuse "the venv python does not run"
+              echo "venv=$(printf '%s\n' "$venv_packages" | sha256sum | cut -c1-64)"
+              frozen_bad="$(sha256sum --check --quiet frozen_files.sha256 2>&1)"
+              frozen_exit=$?
+              echo "frozen=$(grep -c '^[0-9a-f]' frozen_files.sha256) entries, exit=$frozen_exit, list=$(sha256sum frozen_files.sha256 | cut -c1-64) bad=[$frozen_bad]"
+              data_expected="$("$venv/bin/python" -c "$expected_data" results/v2/dataset_preprocessing/dataset_preprocessing_facts.json)"
+              data_actual="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && sha256sum "data/processed/$name" | awk -v name="$name" '{print $1, name}'; done)"
+              echo "$data_actual"
+              if [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ]; then echo "data=MATCH"; else echo "data=DIFFERENT"; fi
+              data_missing="$(printf '%s\n' "$data_expected" | while read -r _ name; do [ -n "$name" ] && [ ! -f "data/processed/$name" ] && echo "$name"; done | tr '\n' ' ')"
+              [ -z "$data_missing" ] || refuse "a cleaned data file is missing: $data_missing"
+              [ -n "$data_actual" ] && [ "$data_actual" = "$data_expected" ] || refuse "the cleaned data differs from the facts file"
+              [ -z "$status" ] || refuse "the repository has uncommitted or untracked files"
+              [ "$frozen_exit" -eq 0 ] || refuse "a frozen file differs from frozen_files.sha256"
+              if [ -n "$LAUNCH_TAG" ]; then
+                  [ "$(git tag --points-at HEAD --list "$LAUNCH_TAG")" = "$LAUNCH_TAG" ] || refuse "HEAD is not the tag $LAUNCH_TAG"
+              fi
+              free_gb="$(df --output=avail -BG "$HOME" | tail -n 1 | tr -dc '0-9')"
+              echo "free=${free_gb}G needed=${MIN_FREE_GB}G"
+              [ "$free_gb" -ge "$MIN_FREE_GB" ] || refuse "less than ${MIN_FREE_GB}G free on the home volume"
+              kernel_dir="$("$venv/bin/jupyter" kernelspec list | awk '$1 == "python3" {print $2}')"
+              [ "$kernel_dir" = "$venv/share/jupyter/kernels/python3" ] || refuse "the kernel python3 is not the one of the venv: [$kernel_dir]"
+              "$venv/bin/python" -c "$cpu_check" || refuse "another CPU type - the SIMD list differs from EXPECTED_CPU_SIMD"
+              [[ "$NOTEBOOK" =~ ^[a-z]+/[^/]+\.ipynb$ ]] || refuse "NOTEBOOK has to be <folder>/<name>.ipynb below notebooks"
+              [ -f "notebooks/$NOTEBOOK" ] || refuse "the notebook notebooks/$NOTEBOOK is missing"
+              "$venv/bin/python" -c "$params_check" "notebooks/$NOTEBOOK" || refuse "PARAMS_YAML does not fit the notebook"
+              cd "notebooks/$(dirname "$NOTEBOOK")" || refuse "the notebook folder is missing"
+              while :; do echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(awk '$1 == "anon" || $1 == "shmem" || $1 == "file_dirty" {printf "%s=%s ", $1, $2}' /sys/fs/cgroup/memory.stat)peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null) oom_kill=$(awk '$1 == "oom_kill" {print $2}' /sys/fs/cgroup/memory.events)"; sleep "$SAMPLE_SECONDS"; done >> "$HOME/logs/$run.memory" 2>&1 &
+              echo "papermill started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              exec "$venv/bin/papermill" "$(basename "$NOTEBOOK")" "$HOME/logs/$run.ipynb" -k python3 --cwd . --log-output --no-progress-bar --start-timeout 600 -y "$PARAMS_YAML"
+          resources:
+            requests:
+              cpu: "{{CPU}}"
+              memory: "{{MEMORY}}"
+            limits:
+              cpu: "{{CPU}}"
+              memory: "{{MEMORY}}"
+          volumeMounts:
+            - name: home
+              mountPath: /home/jovyan
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: xpokor17-home-jupyter-xpokor17--dt  # the home of dt
