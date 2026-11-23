@@ -55,6 +55,8 @@ CHUNK_SIZE = 16
 # texts sent to the workers per round, so the texts of a split are never all in memory
 BATCH_SIZE = 4_096
 TEXT2GRAPHAPI_LOGGERS = ["IntegratedSyntacticGraph", "Preprocessing", "Utils"]
+# a worker is replaced after this many chunks, so the memory of its caches stays bounded
+CHUNKS_PER_WORKER = 250
 COLUMNS_FILE = "columns.json"
 MANIFEST_FILE = "manifest.json"
 # NLTK data outside uv.lock decides tokens and synonyms, so the manifest records its hash
@@ -493,7 +495,11 @@ def build_isg_vectors(
     splits = {}
     # spawn: every worker is a new Python process that inherits PYTHONHASHSEED from this one
     mp_context = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=workers, mp_context=mp_context) as executor:
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=mp_context,
+        max_tasks_per_child=CHUNKS_PER_WORKER,
+    ) as executor:
         # SPLITS starts with train, so the training texts decide the columns
         for name in SPLITS:
             splits[name] = _build_split(
@@ -595,7 +601,7 @@ def build_isg_features(
         sp.vstack([split.first for split in fit], format="csr"),
         sp.vstack([split.second for split in fit], format="csr"),
     )
-    # copies of their own, so a column a caller adds never reaches the loaded vectors
+    # copies of their own, so a column a caller adds never reaches the loaded pairs
     fit_pairs_df = pd.concat(
         [split.pairs_df for split in fit],
         ignore_index=True,

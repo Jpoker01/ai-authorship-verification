@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 import sys
 from collections import Counter
 from collections.abc import Iterator
@@ -163,7 +165,11 @@ def _word_counts(text: str) -> Counter[str]:
 def fake_build(monkeypatch: pytest.MonkeyPatch) -> None:
     """build_isg_vectors without spaCy: threads instead of processes, a word count as features."""
 
-    def thread_pool(max_workers: int, mp_context: object) -> Executor:
+    def thread_pool(
+        max_workers: int,
+        mp_context: object,
+        max_chunks_per_worker: int,
+    ) -> Executor:
         return ThreadPoolExecutor(max_workers)
 
     monkeypatch.setattr(graph, "ProcessPoolExecutor", thread_pool)
@@ -180,7 +186,7 @@ def fake_build(monkeypatch: pytest.MonkeyPatch) -> None:
 def small_paths(tmp_path: Path) -> dict[str, Path]:
     """Cleaned files: 2 train, 1 validation and 1 test pair; "seen" is a train word only."""
     pairs_by_split = {
-        "train": _pairs([("a b", "b c"), ("c seen", "a")], "train"),
+        "train": _pairs([("b seen", "a"), ("c", "b")], "train"),
         "validation": _pairs([("a unseen", "b")], "validation"),
         "test": _pairs([("c", "unseen b")], "test"),
     }
@@ -259,6 +265,22 @@ def test_load_isg_keeps_tok2vec_and_the_text_length_limit_of_text2graphapi() -> 
 
     assert "tok2vec" in isg.prep.nlp.pipe_names
     assert isg.prep.nlp.max_length > spacy_default_limit
+
+
+@pytest.mark.parametrize("seed", ["1", "random"])
+def test_check_hash_seed_refuses_any_seed_but_0(seed: str) -> None:
+    """A Python started with another fixed seed or a random seed is refused."""
+    environment = {**os.environ, "PYTHONHASHSEED": seed}
+    command = [
+        sys.executable,
+        "-c",
+        "from avcore.graph import _check_hash_seed; _check_hash_seed()",
+    ]
+
+    result = subprocess.run(command, env=environment, capture_output=True, text=True)
+
+    assert result.returncode != 0
+    assert "PYTHONHASHSEED=0" in result.stderr
 
 
 @needs_random_hash_seed
@@ -347,6 +369,14 @@ def test_text_file_sha256_ignores_line_endings_but_not_edits(tmp_path: Path) -> 
     assert _text_file_sha256(edited_file) != _text_file_sha256(linux_file)
 
 
+def test_graph_module_sha256_is_the_hash_of_graph_py() -> None:
+    """The source hash the vectors are checked against is the hash of graph.py itself."""
+    graph_py = Path(graph.__file__)
+
+    assert graph_py.name == "graph.py"
+    assert graph._graph_module_sha256() == _text_file_sha256(graph_py)
+
+
 def test_manifest_names_every_saved_file(tmp_path: Path) -> None:
     """Every file of the folder but the manifest has its hash in the manifest."""
     vectors_dir = tmp_path / "isg"
@@ -433,6 +463,26 @@ def test_build_isg_vectors_refuses_a_file_the_context_did_not_hash(
     assert not vectors_dir.exists()
 
 
+def test_build_isg_vectors_refuses_missing_nltk_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """NLTK data that is not installed stops the run before any graph."""
+    monkeypatch.setattr(graph, "_check_hash_seed", lambda: None)
+    monkeypatch.setattr(graph, "NLTK_RESOURCES", ["corpora/not_installed.zip"])
+    pairs_by_split = {}
+    for name in SPLITS:
+        pairs_by_split[name] = _pairs([("A text.", "B text.")], name)
+    cleaned_paths = _write_splits(pairs_by_split, tmp_path)
+    context = _context_of(cleaned_paths)
+    vectors_dir = tmp_path / "isg"
+    workers = 1
+
+    with pytest.raises(LookupError):
+        build_isg_vectors(cleaned_paths, vectors_dir, context, workers=workers)
+    assert not vectors_dir.exists()
+
+
 @pytest.mark.usefixtures("fake_build")
 def test_build_isg_vectors_numbers_the_columns_from_the_training_texts(
     small_paths: dict[str, Path],
@@ -442,9 +492,10 @@ def test_build_isg_vectors_numbers_the_columns_from_the_training_texts(
     vectors_dir = tmp_path / "isg"
     context = _context_of(small_paths)
     workers = 2
-    expected_columns = ["LEX::a", "LEX::b", "LEX::c", "LEX::seen"]
+    # sorted would be a, b, c, seen; pair after pair would be b, seen, a, c
+    expected_columns = ["LEX::b", "LEX::seen", "LEX::c", "LEX::a"]
     expected_test_first = np.array([[0, 0, 1, 0]], dtype=np.float32)
-    expected_test_second = np.array([[0, 1, 0, 0]], dtype=np.float32)
+    expected_test_second = np.array([[1, 0, 0, 0]], dtype=np.float32)
 
     build_isg_vectors(small_paths, vectors_dir, context, workers=workers)
     vectors = load_isg_vectors(vectors_dir, context)
@@ -701,22 +752,22 @@ def test_load_isg_vectors_refuses_vectors_of_other_sources(
         load_isg_vectors(vectors_dir, context)
 
 
-def test_load_isg_vectors_refuses_a_side_of_another_shape(tmp_path: Path) -> None:
-    """A side without one row per pair and one column per feature is not loaded."""
+@pytest.mark.parametrize("side", ["first", "second"])
+def test_load_isg_vectors_refuses_a_side_of_another_shape(
+    side: str,
+    tmp_path: Path,
+) -> None:
+    """A first or a second side without one column per feature is not loaded."""
     vectors_dir = tmp_path / "isg"
     isg_vectors = _isg_vectors()
     test = isg_vectors.splits["test"]
-    narrow_first = test.first[:, :2]
+    sides = {"first": test.first, "second": test.second}
+    sides[side] = sides[side][:, :2]
     isg_vectors.splits["test"] = SplitMatrices(
         pairs_df=test.pairs_df,
-        first=narrow_first,
-        second=test.second,
+        first=sides["first"],
+        second=sides["second"],
     )
-    sources = _sources(CONTEXT)
-    _write_isg_vectors(vectors_dir, isg_vectors, sources, BUILT_WITH)
-
-    with pytest.raises(ValueError, match="test has a side of shape"):
-        load_isg_vectors(vectors_dir, CONTEXT)
 
 
 @pytest.mark.parametrize(("fit_splits", "target_split"), [TUNING, FINAL, HELD_OUT])
