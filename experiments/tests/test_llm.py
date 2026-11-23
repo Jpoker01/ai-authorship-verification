@@ -180,6 +180,8 @@ class FakeEngine:
         self.fail_at_call = fail_at_call
         self.reverse_outputs = False
         self.drop_last_output = False
+        # "length" makes every answer a cut one
+        self.finish_reason = "stop"
 
     def _answer_for(self, prompt_ids: list[int]) -> str:
         """Return the answer of the pair whose marker word is in the prompt.
@@ -200,7 +202,7 @@ class FakeEngine:
         completion = SimpleNamespace(
             text=text,
             token_ids=token_ids,
-            finish_reason="stop",
+            finish_reason=self.finish_reason,
         )
         return SimpleNamespace(prompt_token_ids=prompt_ids, outputs=[completion])
 
@@ -437,6 +439,13 @@ def test_parse_answer_without_a_boolean_answer_value_is_unanswered(text: str) ->
 def test_parse_answer_with_agreeing_values_is_answered() -> None:
     """The same value twice is one answer."""
     text = f"{JSON_TRUE} and once more {JSON_TRUE}"
+    parsed = llm.parse_answer(text)
+    assert parsed == llm.ParsedAnswer(pred=llm.SAME_AUTHOR, status=llm.ANSWERED)
+
+
+def test_parse_answer_with_one_value_in_two_letter_cases_is_answered() -> None:
+    """The same value written True and true is one answer."""
+    text = '**Answer:** True\n{"answer": true}'
     parsed = llm.parse_answer(text)
     assert parsed == llm.ParsedAnswer(pred=llm.SAME_AUTHOR, status=llm.ANSWERED)
 
@@ -704,6 +713,19 @@ def test_prepare_answers_dir_names_a_changed_setting_and_changes_nothing(
     with pytest.raises(RuntimeError, match="chunk_size"):
         llm.prepare_answers_dir(answers_dir, changed_description)
     assert leftover_path.is_file()
+
+
+def test_prepare_answers_dir_names_a_setting_the_new_run_lacks(
+    tmp_path: Path,
+    run_description: dict,
+) -> None:
+    """A stored setting that is missing from the new description is refused and named."""
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    changed_description = dict(run_description)
+    del changed_description["chunk_size"]
+    with pytest.raises(RuntimeError, match="chunk_size"):
+        llm.prepare_answers_dir(answers_dir, changed_description)
 
 
 def test_prepare_answers_dir_removes_a_leftover_partial_file(
@@ -1011,6 +1033,30 @@ def test_read_answers_parses_every_pair_in_order(
     assert generated.answers_df["prompt_tokens"].tolist() == expected_prompt_tokens
 
 
+def test_read_answers_keeps_the_finish_reason_of_the_engine(
+    tmp_path: Path,
+    chat_builder: llm.PromptBuilder,
+    run_description: dict,
+) -> None:
+    """An answer the engine cut keeps the finish reason "length"."""
+    pairs_df = make_pairs(4)
+    answers_dir = tmp_path / "answers"
+    llm.prepare_answers_dir(answers_dir, run_description)
+    engine = FakeEngine(make_engine_answers(4), chat_builder.tokenizer)
+    engine.finish_reason = "length"
+    llm.generate_answers(
+        engine,
+        SAMPLING_PARAMS,
+        chat_builder,
+        pairs_df,
+        answers_dir,
+        CHUNK_SIZE,
+    )
+    pair_ids = pairs_df["id"].tolist()
+    generated = llm.read_answers(answers_dir, pair_ids, CHUNK_SIZE)
+    assert generated.answers_df["finish_reason"].tolist() == ["length"] * 4
+
+
 def test_read_answers_raises_for_a_missing_chunk(
     tmp_path: Path,
     chat_builder: llm.PromptBuilder,
@@ -1103,6 +1149,21 @@ def test_build_prediction_tables_applies_the_unanswered_rule(
     assert tables.predictions_df["pred"].tolist() == expected_pred
     assert tables.predictions_df["score"].tolist() == expected_score
     assert tables.unanswered_df["id"].tolist() == ["c"]
+
+
+def test_build_prediction_tables_treats_conflicting_answers_as_unanswered() -> None:
+    """A pair with both values gets the unanswered pred and score and is listed as conflicting."""
+    pairs_df = pd.DataFrame({"id": ["a"], "same": [True]})
+    answers_df = make_answers_df(["a"], [f"{JSON_TRUE} or {JSON_FALSE}"])
+    tables = llm.build_prediction_tables(
+        pairs_df,
+        answers_df,
+        UNANSWERED_PRED,
+        UNANSWERED_SCORE,
+    )
+    assert tables.predictions_df["pred"].tolist() == [UNANSWERED_PRED]
+    assert tables.predictions_df["score"].tolist() == [UNANSWERED_SCORE]
+    assert tables.unanswered_df["status"].tolist() == [llm.CONFLICTING_ANSWERS]
 
 
 def test_build_prediction_tables_keeps_an_empty_unanswered_table() -> None:
