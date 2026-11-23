@@ -289,8 +289,6 @@ def _to_matrix(
     Returns:
         The counts as float32, one column per feature in columns.
     """
-    # a text has only a few of all the features, so only its non-zero cells are stored
-    # typed arrays store 4 bytes per value; a list stores a pointer plus a number object
     cell_counts = array("f")
     cell_columns = array("i")
     cells_per_row = []
@@ -307,3 +305,47 @@ def _to_matrix(
         cells_per_row,
         n_columns=len(columns),
     )
+
+
+def _text_file_sha256(path: Path) -> str:
+    """Return the sha256 of a text file, the same for a Windows (CRLF) and a Linux checkout."""
+    text_bytes = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(text_bytes).hexdigest()
+
+
+def _graph_module_sha256() -> str:
+    """Return the sha256 of this file."""
+    return _text_file_sha256(Path(__file__))
+
+
+def _nltk_data_sha256() -> dict[str, str]:
+    """Return the sha256 of every file of NLTK_RESOURCES found in the NLTK data folders.
+
+    Raises:
+        LookupError: If a resource is not installed.
+    """
+    import nltk
+
+    nltk_data_sha256 = {}
+    for resource in NLTK_RESOURCES:
+        resource_path = Path(str(nltk.data.find(resource)))
+        nltk_data_sha256[resource] = _sha256(resource_path)
+    return nltk_data_sha256
+
+
+def _sources(context: RunContext, data_names: Sequence[str]) -> dict[str, str]:
+    """Return what the vectors depend on - this file, uv.lock and the data files.
+
+    Raises:
+        ValueError: If the context has no hash of one of the data files.
+    """
+    sources = {
+        "graph_py_sha256": _graph_module_sha256(),
+        "uv_lock_sha256": context.environment["uv_lock_sha256"],
+    }
+    for name in data_names:
+        key = f"data_sha256.{name}"
+        if key not in context.environment:
+            raise ValueError(f"The run context has no {key}.")
+        sources[key] = context.environment[key]
+    return sources
