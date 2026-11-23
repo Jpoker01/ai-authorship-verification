@@ -446,3 +446,164 @@ def _write_isg_vectors(
         encoding="utf-8",
     )
     partial_dir.rename(vectors_dir)
+
+
+def build_isg_vectors(
+    cleaned_paths: Mapping[str, Path],
+    vectors_dir: Path,
+    context: RunContext,
+    *,
+    workers: int,
+    on_progress: Callable[..., None] | None = None,
+) -> None:
+    """Build the ISG vector of every text once and save the vectors in vectors_dir.
+
+    The columns are the features of the training texts, in the order they were first seen;
+    a feature that only validation or test texts have is dropped. The workers are new
+    processes, so a script has to call this under if __name__ == "__main__".
+
+    Args:
+        cleaned_paths: Cleaned jsonl file of the train, validation and test split.
+        vectors_dir: Absolute folder that does not exist yet.
+        context: Output of collect_run_context, with the hashes of the cleaned files.
+        workers: Number of worker processes that build the graphs.
+        on_progress: Called after every batch with split, texts_done and texts_total,
+            e.g. ProgressFile.update; it must not touch the vectors.
+
+    Raises:
+        RuntimeError: If Python was not started with PYTHONHASHSEED=0.
+        LookupError: If the NLTK data of NLTK_RESOURCES is not installed.
+        ValueError: If vectors_dir is relative, a split is missing or unknown, or the
+            context has no hash of a cleaned file or the hash of another file.
+        FileExistsError: If vectors_dir or vectors_dir.partial already exists.
+    """
+    # all checks first - the graphs take hours on the full data
+    _check_hash_seed()
+    _check_new_folder(vectors_dir)
+    if set(cleaned_paths) != set(SPLITS):
+        raise ValueError(f"The splits have to be {list(SPLITS)}.")
+    data_names = []
+    for name in SPLITS:
+        data_names.append(cleaned_paths[name].name)
+    sources = _sources(context, data_names)
+    _check_data_files(cleaned_paths, sources)
+    built_with = {"context": context.environment, "nltk_data": _nltk_data_sha256()}
+
+    columns: dict[str, int] = {}
+    splits = {}
+    # spawn: every worker is a new Python process that inherits PYTHONHASHSEED from this one
+    mp_context = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=workers, mp_context=mp_context) as executor:
+        # SPLITS starts with train, so the training texts decide the columns
+        for name in SPLITS:
+            splits[name] = _build_split(
+                executor,
+                name,
+                cleaned_paths[name],
+                columns,
+                on_progress,
+            )
+
+    isg_vectors = PairMatrices(
+        columns=list(columns),
+        settings=dict(SETTINGS),
+        splits=splits,
+    )
+    _write_isg_vectors(vectors_dir, isg_vectors, sources, built_with)
+
+
+def load_isg_vectors(vectors_dir: Path, context: RunContext) -> PairMatrices:
+    """Load the vectors of build_isg_vectors, only if they were built by the same code on the same data.
+
+    Args:
+        vectors_dir: Folder written by build_isg_vectors.
+        context: Output of collect_run_context, with the hashes of the cleaned files.
+
+    Returns:
+        The vectors of both texts of every pair of the three splits.
+
+    Raises:
+        ValueError: If the settings, graph.py, uv.lock, a cleaned file or a saved file
+            differ from the ones the vectors were built with, or a side does not have
+            one row per pair and one column per feature.
+    """
+    manifest = json.loads((vectors_dir / MANIFEST_FILE).read_text(encoding="utf-8"))
+    if manifest["settings"] != SETTINGS:
+        raise ValueError(
+            f"The vectors were built with {manifest['settings']}, not {SETTINGS}.",
+        )
+    saved_sources = manifest["sources"]
+    data_names = []
+    for key in saved_sources:
+        if key.startswith("data_sha256."):
+            data_names.append(key.removeprefix("data_sha256."))
+    sources = _sources(context, data_names)
+    for key, value in saved_sources.items():
+        if sources[key] != value:
+            raise ValueError(f"{key} differs from the one the vectors were built with.")
+    for file_name, value in manifest["files"].items():
+        if _sha256(vectors_dir / file_name) != value:
+            raise ValueError(f"{file_name} was changed after it was written.")
+
+    columns = json.loads((vectors_dir / COLUMNS_FILE).read_text(encoding="utf-8"))
+    splits = {}
+    for name in SPLITS:
+        pairs = json.loads(
+            (vectors_dir / f"{name}_pairs.json").read_text(encoding="utf-8"),
+        )
+        split = SplitMatrices(
+            pairs_df=pd.DataFrame(pairs, columns=PAIRS_COLUMNS),
+            first=sp.load_npz(vectors_dir / f"{name}_1.npz").tocsr(),
+            second=sp.load_npz(vectors_dir / f"{name}_2.npz").tocsr(),
+        )
+        expected_shape = (len(split.pairs_df), len(columns))
+        for side in (split.first, split.second):
+            if side.shape != expected_shape:
+                raise ValueError(
+                    f"{name} has a side of shape {side.shape}, not {expected_shape}.",
+                )
+        splits[name] = split
+    return PairMatrices(columns=columns, settings=manifest["settings"], splits=splits)
+
+
+def build_isg_features(
+    isg_vectors: PairMatrices,
+    fit_splits: Sequence[str],
+    target_split: str,
+) -> PairFeatures:
+    """Return the ISG vectors of the fit pairs and of the target pairs.
+
+    The columns stay those of the training texts for every combination of splits.
+
+    Args:
+        isg_vectors: Output of load_isg_vectors.
+        fit_splits: ["train"] for tuning and the held-out check, ["train", "validation"]
+            for the final model.
+        target_split: "validation" for tuning, "test" otherwise.
+
+    Returns:
+        The vectors of the fit and of the target pairs; vectorizer is None. The target
+        vectors are the loaded matrices themselves, so they must not be changed in place.
+
+    Raises:
+        ValueError: If the splits are not the tuning, the final or the held-out combination.
+    """
+    _check_splits(fit_splits, target_split)
+    fit = [isg_vectors.splits[name] for name in fit_splits]
+    target = isg_vectors.splits[target_split]
+    fit_sides = (
+        sp.vstack([split.first for split in fit], format="csr"),
+        sp.vstack([split.second for split in fit], format="csr"),
+    )
+    # copies of their own, so a column a caller adds never reaches the loaded vectors
+    fit_pairs_df = pd.concat(
+        [split.pairs_df for split in fit],
+        ignore_index=True,
+    ).copy()
+    return PairFeatures(
+        fit_sides=fit_sides,
+        target_sides=(target.first, target.second),
+        fit_pairs_df=fit_pairs_df,
+        target_pairs_df=target.pairs_df.copy(),
+        vectorizer=None,
+    )
