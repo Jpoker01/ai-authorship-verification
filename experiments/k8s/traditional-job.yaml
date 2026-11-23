@@ -77,9 +77,9 @@ spec:
             - name: XDG_CACHE_HOME
               value: /home/jovyan/.cache
             - name: OMP_NUM_THREADS  # the node does not enforce the CPU limit
-              value: "{{CPU}}"
-            - name: OPENBLAS_NUM_THREADS  # = the CPU request
-              value: "{{CPU}}"
+              value: "{{OMP_THREADS}}"
+            - name: OPENBLAS_NUM_THREADS
+              value: "{{OMP_THREADS}}"
             - name: REPO
               value: /home/jovyan/launch/v2-launch-3-traditional
             - name: JUPYTER_PREFER_ENV_PATH
@@ -90,6 +90,8 @@ spec:
               value: "{{NOTEBOOK}}"
             - name: PARAMS_YAML
               value: '{{PARAMS_JSON}}'
+            - name: EXPECTED_CPU_MODEL  # vendor_id, cpu family, model in /proc/cpuinfo
+              value: AuthenticAMD 25 17
             - name: EXPECTED_CPU_SIMD
               value: SSSE3 SSE41 POPCNT SSE42 AVX F16C FMA3 AVX2 AVX512F AVX512CD AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL
             - name: MIN_FREE_GB
@@ -124,7 +126,16 @@ spec:
               print("simd=" + found)
               for pool in threadpool_info():
                   print("threads:", pool["internal_api"], pool["num_threads"], pool["filepath"])
-              sys.exit(0 if found == os.environ["EXPECTED_CPU_SIMD"] else 1)
+              cpu_info = {}
+              with open("/proc/cpuinfo") as cpu_file:
+                  for line in cpu_file:
+                      key, _, value = line.partition(":")
+                      cpu_info.setdefault(key.strip(), value.strip())
+              cpu_model = " ".join([cpu_info["vendor_id"], cpu_info["cpu family"], cpu_info["model"]])
+              print("cpu=" + cpu_model)
+              same_simd = found == os.environ["EXPECTED_CPU_SIMD"]
+              same_model = cpu_model == os.environ["EXPECTED_CPU_MODEL"]
+              sys.exit(0 if same_simd and same_model else 1)
               '
               params_check='
               import ast, json, os, sys
@@ -150,6 +161,9 @@ spec:
                   sys.exit("a smoke run needs a RUN_TAG")
               if not smoke and (run_tag or not os.environ["LAUNCH_TAG"]):
                   sys.exit("a full run needs a LAUNCH_TAG and no RUN_TAG")
+              head = sys.argv[2]
+              if smoke and not run_tag.endswith("-" + head):
+                  sys.exit(f"RUN_TAG {run_tag} does not name the commit {head}")
               print("params checked:", ", ".join(sorted(params)))
               '
               echo "pod=$HOSTNAME commit=$commit started=$(date -u +%Y-%m-%dT%H:%M:%SZ) repo=[$repo]"
@@ -186,8 +200,10 @@ spec:
               kernel_dir="$("$venv/bin/jupyter" kernelspec list | awk '$1 == "python3" {print $2}')"
               [ "$kernel_dir" = "$venv/share/jupyter/kernels/python3" ] || refuse "the kernel python3 is not the one of the venv: [$kernel_dir]"
               "$venv/bin/python" -c "$cpu_check" || refuse "another CPU type - the SIMD list differs from EXPECTED_CPU_SIMD"
+              "$venv/bin/python" -c "$cpu_check" || refuse "another CPU type - the CPU model or the SIMD list differs from EXPECTED_CPU_MODEL / EXPECTED_CPU_SIMD"
               [[ "$NOTEBOOK" =~ ^[a-z]+/[^/]+\.ipynb$ ]] || refuse "NOTEBOOK has to be <folder>/<name>.ipynb below notebooks"
               [ -f "notebooks/$NOTEBOOK" ] || refuse "the notebook notebooks/$NOTEBOOK is missing"
+              "$venv/bin/python" -c "$params_check" "notebooks/$NOTEBOOK" "$(git rev-parse --short=7 HEAD)" || refuse "PARAMS_YAML does not fit the notebook"
               "$venv/bin/python" -c "$params_check" "notebooks/$NOTEBOOK" || refuse "PARAMS_YAML does not fit the notebook"
               cd "notebooks/$(dirname "$NOTEBOOK")" || refuse "the notebook folder is missing"
               while :; do echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(awk '$1 == "anon" || $1 == "shmem" || $1 == "file_dirty" {printf "%s=%s ", $1, $2}' /sys/fs/cgroup/memory.stat)peak=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null) oom_kill=$(awk '$1 == "oom_kill" {print $2}' /sys/fs/cgroup/memory.events)"; sleep "$SAMPLE_SECONDS"; done >> "$HOME/logs/$run.memory" 2>&1 &
