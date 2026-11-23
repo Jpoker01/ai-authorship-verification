@@ -139,3 +139,171 @@ def _load_isg() -> "ISG":
     working_pipeline.max_length = text2graphapi_pipeline.max_length
     isg.prep.nlp = working_pipeline
     return isg
+
+
+def _check_hash_seed() -> None:
+    """Raise RuntimeError unless Python was started with PYTHONHASHSEED=0."""
+    # Python sets this flag at start: 0 for PYTHONHASHSEED=0, 1 for any other seed or none
+    started_with_hash_seed_0 = sys.flags.hash_randomization == 0
+    if not started_with_hash_seed_0:
+        raise RuntimeError(
+            f"Start Python with PYTHONHASHSEED={HASH_SEED} - the synonyms depend on the hash seed.",
+        )
+
+
+def extract_isg_features(text: str) -> Counter[str]:
+    """Build the graph of one text and count its lemmas, tags and dependency relations.
+
+    Args:
+        text: One cleaned text.
+
+    Returns:
+        The output of extract_features_from_isg for the graph of the text.
+
+    Raises:
+        RuntimeError: If Python was not started with PYTHONHASHSEED=0.
+    """
+    _check_hash_seed()
+    isg = _load_isg()
+    # one text per call - the texts of one call become one graph
+    graph = isg.transform([{"id": 0, "doc": text}])[0]["graph"]
+    return extract_features_from_isg(graph)
+
+
+def _iter_text_batches(texts: Iterable[str]) -> Iterator[list[str]]:
+    """Yield the texts in their order, in lists of at most BATCH_SIZE texts."""
+    # an iterator, so every round takes the next texts and not the first ones again
+    remaining_texts = iter(texts)
+    while True:
+        batch = list(islice(remaining_texts, BATCH_SIZE))
+        if not batch:
+            break
+        yield batch
+
+
+def _iter_isg_features(
+    executor: Executor,
+    texts: Iterable[str],
+    on_batch: Callable[[int], None] | None = None,
+) -> Iterator[Counter[str]]:
+    """Yield the features of every text in the order of the texts.
+
+    The texts go to the workers one batch at a time, and the next batch is read only after
+    the caller has taken the features of every text of the current one.
+
+    Args:
+        executor: Pool of workers that build the graphs.
+        texts: Texts of one split.
+        on_batch: Called after every batch with the number of texts done so far.
+    """
+    texts_done = 0
+    for batch in _iter_text_batches(texts):
+        # map returns the features in the order of the batch, whichever worker finishes first
+        batch_features = executor.map(extract_isg_features, batch, chunksize=CHUNK_SIZE)
+        # hands the caller one text at a time and pauses until it asks for the next one
+        yield from batch_features
+        texts_done += len(batch)
+        if on_batch is not None:
+            on_batch(texts_done)
+
+
+def _add_new_columns(features: Mapping[str, int], columns: dict[str, int]) -> None:
+    """Give every feature that has no column yet the next free column.
+
+    Args:
+        features: Features of one text, e.g. {"LEX::walk": 1, "POS::VERB": 2}.
+        columns: Column number of every known feature; the new features are added to it.
+    """
+    for name in features:
+        if name not in columns:
+            # the columns are numbered 0, 1, 2, ..., so the next free one is their count
+            columns[name] = len(columns)
+
+
+def _feature_row(
+    features: Mapping[str, int],
+    columns: Mapping[str, int],
+) -> dict[int, int]:
+    """Return the matrix row of one text as {column: count}.
+
+    Args:
+        features: Features of one text, e.g. {"LEX::walk": 1, "POS::VERB": 2}.
+        columns: Column number of every known feature; a feature without a column is dropped.
+    """
+    row = {}
+    for name, count in features.items():
+        if name in columns:
+            column = columns[name]
+            row[column] = count
+    return row
+
+
+def _build_sparse_matrix(
+    cell_counts: array,
+    cell_columns: array,
+    cells_per_row: Sequence[int],
+    *,
+    n_columns: int,
+) -> sp.csr_matrix:
+    """Build a sparse matrix from its non-zero cells, listed row after row.
+
+    Args:
+        cell_counts: Count of every non-zero cell, as float32.
+        cell_columns: Column of every non-zero cell, as int32, at the position of its count.
+        cells_per_row: Number of non-zero cells of every row.
+        n_columns: Number of columns of the matrix.
+
+    Returns:
+        The matrix in the csr format of scipy, the cells of every row in the order of the columns.
+    """
+    # scipy takes the position where every row starts in the list of cells and where the
+    # last row ends: for rows of 2, 2 and 1 cells that is 0, 2, 4, 5
+    row_boundaries = np.concatenate(([0], np.cumsum(cells_per_row, dtype=np.int64)))
+    matrix = sp.csr_matrix(
+        (
+            # np.frombuffer reads the typed arrays where they are, without copying them
+            np.frombuffer(cell_counts, dtype=np.float32),
+            np.frombuffer(cell_columns, dtype=np.int32),
+            row_boundaries,
+        ),
+        shape=(len(cells_per_row), n_columns),
+    )
+    # the cells of a row are in the order its features were seen, not in the order of the columns
+    matrix.sort_indices()
+    return matrix
+
+
+def _to_matrix(
+    all_features: Iterable[Mapping[str, int]],
+    columns: dict[str, int],
+    *,
+    add_columns: bool,
+) -> sp.csr_matrix:
+    """Return one row per text with the counts of its features.
+
+    Args:
+        all_features: Features of every text.
+        columns: Column number of every known feature; new features are added to it if add_columns.
+        add_columns: Whether a feature without a column gets the next free column or is dropped.
+
+    Returns:
+        The counts as float32, one column per feature in columns.
+    """
+    # a text has only a few of all the features, so only its non-zero cells are stored
+    # typed arrays store 4 bytes per value; a list stores a pointer plus a number object
+    cell_counts = array("f")
+    cell_columns = array("i")
+    cells_per_row = []
+    for features in all_features:
+        if add_columns:
+            _add_new_columns(features, columns)
+        row = _feature_row(features, columns)
+        cell_counts.extend(row.values())
+        cell_columns.extend(row.keys())
+        cells_per_row.append(len(row))
+    return _build_sparse_matrix(
+        cell_counts,
+        cell_columns,
+        cells_per_row,
+        n_columns=len(columns),
+    )
