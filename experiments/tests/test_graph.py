@@ -580,7 +580,7 @@ def test_build_isg_vectors_replaces_the_pool_after_texts_per_worker_texts(
     """Two workers, 1 text per worker and 1 text per batch start 2 + 1 + 1 pools for 4 + 2 + 2 texts."""
     vectors_dir = tmp_path / "isg"
     context = _context_of(small_paths)
-    workers = 1
+    workers = 2
     pools_started = []
 
     def thread_pool(max_workers: int, mp_context: object) -> Executor:
@@ -638,7 +638,7 @@ def test_build_isg_vectors_records_the_build_run_and_the_nltk_data(
     """The manifest keeps the context of the build and the hashes of the NLTK data."""
     vectors_dir = tmp_path / "isg"
     context = _context_of(small_paths)
-    workers = 2
+    workers = 1
     expected_built_with = {
         "context": context.environment,
         "nltk_data": {"corpora/wordnet.zip": "d" * 64},
