@@ -1,0 +1,36 @@
+[project]
+name = "verifyauthor-backend"
+version = "2.0.0"
+description = "FastAPI backend of the authorship verification web app"
+# the training data was cleaned on 3.11.6 and html.parser changes from 3.11.14 on
+requires-python = ">=3.11.6,<3.11.14"
+dependencies = [
+    "fastapi==0.128.0",
+    "uvicorn[standard]==0.40.0",
+    # the same versions as experiments/uv.lock, so the model files and the cleaning match the training
+    "beautifulsoup4==4.15.0",
+    "joblib==1.6.0",
+    "numpy==1.26.4",
+    "scikit-learn==1.3.2",
+    "scipy==1.17.1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "pytest==9.0.2",
+    "ruff",
+]
+
+[tool.uv]
+# Railway (Linux x86_64) and local PyCharm (Windows) only
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'win32'",
+]
+constraint-dependencies = [
+    "cloudpickle==3.1.2",
+    "soupsieve==4.0.1",
+    "threadpoolctl==3.8.0",
+    "typing-extensions==4.16.0",
+]
