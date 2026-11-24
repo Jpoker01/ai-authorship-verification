@@ -98,6 +98,12 @@ spec:
               value: "{{MIN_FREE_GB}}"
             - name: SAMPLE_SECONDS
               value: "60"
+            - name: PYTHONHASHSEED
+              value: "0"
+            - name: NLTK_DATA
+              value: /home/jovyan/nltk_data
+            - name: TQDM_MININTERVAL  # seconds
+              value: "60"
           command: ["bash", "-c"]
           args:
             - |
@@ -167,6 +173,11 @@ spec:
               print("params checked:", ", ".join(sorted(params)))
               '
               echo "pod=$HOSTNAME commit=$commit started=$(date -u +%Y-%m-%dT%H:%M:%SZ) repo=[$repo]"
+                            nltk_check='
+              import nltk
+              for resource in ["tokenizers/punkt_tab.zip", "corpora/wordnet.zip", "tokenizers/punkt", "wordnet", "omw-1.4"]:
+                  nltk.data.find(resource)
+              '
               lscpu | grep -E '^(Model name|CPU\(s\))'
               echo "cpu.max=[$(cat /sys/fs/cgroup/cpu.max)] memory.max=[$(cat /sys/fs/cgroup/memory.max)] OMP_NUM_THREADS=[$OMP_NUM_THREADS]"
               echo "NOTEBOOK=[$NOTEBOOK] PARAMS_YAML=[$PARAMS_YAML] LAUNCH_TAG=[$LAUNCH_TAG]"
@@ -199,6 +210,8 @@ spec:
               [ "$free_gb" -ge "$MIN_FREE_GB" ] || refuse "less than ${MIN_FREE_GB}G free on the home volume"
               kernel_dir="$("$venv/bin/jupyter" kernelspec list | awk '$1 == "python3" {print $2}')"
               [ "$kernel_dir" = "$venv/share/jupyter/kernels/python3" ] || refuse "the kernel python3 is not the one of the venv: [$kernel_dir]"
+              "$venv/bin/python" -c 'import sys; sys.exit(sys.flags.hash_randomization)' || refuse "Python does not start with PYTHONHASHSEED=0"
+              "$venv/bin/python" -c "$nltk_check" || refuse "the NLTK data in $NLTK_DATA is incomplete - zips, or the root links wordnet and omw-1.4"
               "$venv/bin/python" -c "$cpu_check" || refuse "another CPU type - the CPU model or the SIMD list differs from EXPECTED_CPU_MODEL / EXPECTED_CPU_SIMD"
               [[ "$NOTEBOOK" =~ ^[a-z]+/[^/]+\.ipynb$ ]] || refuse "NOTEBOOK has to be <folder>/<name>.ipynb below notebooks"
               [ -f "notebooks/$NOTEBOOK" ] || refuse "the notebook notebooks/$NOTEBOOK is missing"
