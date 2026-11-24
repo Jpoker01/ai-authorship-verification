@@ -3,6 +3,7 @@
 # NOT applied as it is - make_isg_extraction_job.py fills the {{...}} fields and writes the manifest
 # into a new folder below the git-ignored experiments/outputs; check its manifests.sha256, then apply it
 # from a terminal on that hub server, in the launch checkout:
+#   bash experiments/k8s/launch.sh <generated manifests>
 apiVersion: batch/v1
 kind: Job
 metadata:
