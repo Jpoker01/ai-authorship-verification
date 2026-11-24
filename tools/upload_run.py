@@ -28,7 +28,6 @@ from typing import IO
 from urllib.parse import urlparse
 
 from avcore import tracking
-from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
 logger = logging.getLogger(__name__)
@@ -75,6 +74,7 @@ DATA_LINE_PATTERN = re.compile(r"(?P<sha256>[0-9a-f]{64}) (?P<name>\S+)")
 # the gpu_check line - torch version, CUDA version, GPU name, compute capability
 GPU_LINE_PATTERN = re.compile(r"\S+ \S+ (?P<gpu>.+) \(\d+, \d+\)")
 PARAM_FIELD_PATTERN = re.compile(r"(?P<key>\w+)=\[(?P<value>[^\]]*)\]")
+PARAMS_LINE_STARTS = ("params SMOKE=[", "params MODEL_ID=[", "NOTEBOOK=[")
 
 
 class CheckFailed(Exception):
@@ -204,7 +204,7 @@ def read_proof_line(line: str, proof: dict) -> None:
     """Store the fields of one line of the proof block in proof."""
     if line.startswith("START REFUSED"):
         proof["refused"] = True
-    if line.startswith(("params ", "NOTEBOOK=[")):
+    if line.startswith(PARAMS_LINE_STARTS):
         proof["params"] = line
     data_match = DATA_LINE_PATTERN.fullmatch(line)
     if data_match:
@@ -687,20 +687,17 @@ def main() -> int:
     handler = logging.StreamHandler(sys.stdout)
     handler.addFilter(RedactingFilter())
     logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[handler])
+    # MLflow logs through a handler of its own, not through the root handler
+    for mlflow_handler in logging.getLogger("mlflow").handlers:
+        mlflow_handler.addFilter(RedactingFilter())
     args = parse_arguments()
     try:
         run(args)
     except CheckFailed as error:
         logger.error(f"FAIL  {error}")
         return 1
-    except (
-        MlflowException,
-        OSError,
-        RuntimeError,
-        KeyError,
-        ValueError,
-        subprocess.CalledProcessError,
-    ) as error:
+    # the last resort of the command line - a traceback would pass no filter
+    except Exception as error:  # noqa: BLE001
         logger.error(f"FAIL  {type(error).__name__} - {error}")
         return 1
     return 0
