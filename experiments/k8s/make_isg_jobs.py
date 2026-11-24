@@ -141,7 +141,7 @@ def check_vectors(smoke_tag: str) -> None:
 def relabel(template: str) -> str:
     """Return the traditional template with the label of the graph family.
 
-    Raises:
+    Raises:`
         SystemExit: If the template does not hold the label exactly twice (Job and pod).
     """
     if template.count(TRADITIONAL_LABEL) != 2:

@@ -33,7 +33,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def write_csv(table_df: pd.DataFrame, path: Path) -> None:
-        """Write a table as UTF-8 CSV with LF line ends and log its number of rows.
+    """Write a table as UTF-8 CSV with LF line ends and log its number of rows.
 
     Args:
         table_df: The table, written without its index.
