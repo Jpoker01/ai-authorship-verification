@@ -71,7 +71,14 @@ def compute_test_metrics(predictions_df: pd.DataFrame) -> dict[str, float]:
 
 
 def read_test_predictions(run_dir: Path) -> pd.DataFrame:
-    """Read the test predictions of a run folder, with the ids kept as text."""
+    """Read the test predictions of a run folder.
+
+    Args:
+        run_dir: Folder written by tracking.write_run_files.
+
+    Returns:
+        The columns id (text, so leading zeros stay), same, score and pred.
+    """
     return pd.read_csv(run_dir / TEST_PREDICTIONS_FILE, dtype={"id": str})
 
 
@@ -160,6 +167,11 @@ def build_result_table(
     return table_df[columns].reset_index(drop=True)
 
 
+def _name_length(run_names: pd.Series) -> pd.Series:
+    """Return the length of every run name; an untagged run has the shorter one."""
+    return run_names.str.len()
+
+
 def build_replicate_table(runs_df: pd.DataFrame, results_dir: Path) -> pd.DataFrame:
     """Put the two runs of every configuration that was run twice side by side.
 
@@ -176,11 +188,16 @@ def build_replicate_table(runs_df: pd.DataFrame, results_dir: Path) -> pd.DataFr
     for _, group_df in runs_df.groupby(IDENTITY_COLUMNS, sort=False):
         if len(group_df) != 2:
             continue
+        # the run without RUN_TAG becomes run_1, its repeat run_2
+        group_df = group_df.sort_values("run_name", key=_name_length, kind="stable")
         first_run = group_df.iloc[0]
         second_run = group_df.iloc[1]
-        # the order of the joined names says which run is run_1
         run_name = f"{first_run['run_name']}+{second_run['run_name']}"
-        for quantity in [*METRIC_COLUMNS, *LLM_COUNT_METRICS]:
+        quantities = list(METRIC_COLUMNS)
+        # only the LLM runs log the counts of unanswered and cut pairs
+        if first_run["family"] == "llm":
+            quantities.extend(LLM_COUNT_METRICS)
+        for quantity in quantities:
             first_value = first_run[quantity]
             second_value = second_run[quantity]
             rows.append(

@@ -81,17 +81,17 @@ def test_build_result_table_ranks_by_f1_and_keeps_max_rows() -> None:
 
 
 def test_build_replicate_table_gives_share_of_same_predictions(tmp_path: Path) -> None:
-    """Two runs that differ on 2 of 10 pairs give 80 % same predictions and the mean."""
+    """The untagged run is run_1; 2 of 10 differing pairs give 80 % same predictions."""
     first_predictions = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
     second_predictions = [1, 1, 1, 1, 0, 1, 0, 0, 0, 0]
     write_predictions(tmp_path / "granite_r2_v2", first_predictions)
     write_predictions(tmp_path / "granite_v2", second_predictions)
     runs_df = pd.DataFrame(
         [
-            make_run("granite_r2_v2", "llm", "granite", 50.0),
-            make_run("granite_v2", "llm", "granite", 60.0),
+            make_run("granite_r2_v2", "llm", "granite", 60.0),
+            make_run("granite_v2", "llm", "granite", 50.0),
         ],
-    ).assign(n_unanswered=[5.0, 7.0], n_cut_by_context=0.0, n_cut_by_budget=0.0)
+    ).assign(n_unanswered=[7.0, 5.0], n_cut_by_context=0.0, n_cut_by_budget=0.0)
     replicate_df = results.build_replicate_table(runs_df, tmp_path)
     replicate_df = replicate_df.set_index("quantity")
     f1_row = replicate_df.loc["f1"]
@@ -122,3 +122,21 @@ def test_build_confusion_table_normalizes_per_actual_class() -> None:
             "pred_0_percent": 50.0,
         },
     ]
+
+
+def test_build_replicate_table_skips_llm_counts_of_other_families(
+    tmp_path: Path,
+) -> None:
+    """A repeated traditional run gives the four metric rows and no LLM count rows."""
+    predictions = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+    write_predictions(tmp_path / "svc_r2_v2", predictions)
+    write_predictions(tmp_path / "svc_v2", predictions)
+    runs_df = pd.DataFrame(
+        [
+            make_run("svc_r2_v2", "traditional", "none", 80.0),
+            make_run("svc_v2", "traditional", "none", 82.0),
+        ],
+    ).assign(n_unanswered=None, n_cut_by_context=None, n_cut_by_budget=None)
+    replicate_df = results.build_replicate_table(runs_df, tmp_path)
+    expected_quantities = [*METRIC_COLUMNS, "same_prediction"]
+    assert replicate_df["quantity"].tolist() == expected_quantities

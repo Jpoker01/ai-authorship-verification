@@ -20,7 +20,12 @@ logger = logging.getLogger(__name__)
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse the folder of the run folders and the folder the CSV files go to."""
+    """Parse the command line.
+
+    Returns:
+        results_dir - the folder of the run folders; output_dir - the folder the CSV
+        files go to.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -28,7 +33,12 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def write_csv(table_df: pd.DataFrame, path: Path) -> None:
-    """Write a table as UTF-8 CSV with LF line ends and log its number of rows."""
+        """Write a table as UTF-8 CSV with LF line ends and log its number of rows.
+
+    Args:
+        table_df: The table, written without its index.
+        path: The CSV file.
+    """
     table_df.to_csv(path, index=False, encoding="utf-8", lineterminator="\n")
     logger.info(f"written {path.name} ({len(table_df)} rows)")
 
