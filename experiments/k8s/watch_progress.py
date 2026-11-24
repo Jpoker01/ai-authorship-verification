@@ -25,6 +25,8 @@ REFRESH_SECONDS = 10
 # progress files untouched for longer are finished or abandoned runs
 SHOWN_HOURS = 24
 BAR_WIDTH = 30
+# the compact view has one bar per run, so a shorter one keeps the row on the screen
+LINE_BAR_WIDTH = 16
 # the fields every progress file has - other files in ~/logs are skipped
 REQUIRED_FIELDS = {"run", "host", "stage", "stage_started_at", "updated_at"}
 
@@ -127,6 +129,118 @@ class SpeedTracker:
         return (steps_total - steps_done) / speed
 
 
+def pod_phase(progress: dict, pods: dict[str, str] | None) -> str:
+    """Return the phase of the pod of a run, or why there is none."""
+    if pods is None:
+        return "kubectl not reachable"
+    return pods.get(progress["host"], "pod gone")
+
+
+def seconds_since(iso_time: str, now: float) -> float:
+    """Return the seconds from an ISO timestamp of a progress file to now."""
+    return now - datetime.fromisoformat(iso_time).timestamp()
+
+
+def estimate_tuning_seconds(
+    progress: dict,
+    remaining: float | None,
+    stage_seconds: float,
+) -> float | None:
+    """Return the seconds until the tuning ends, None before the first trial has finished.
+
+    Args:
+        progress: One parsed progress file.
+        remaining: Seconds left in the running trial from SpeedTracker, None if unknown.
+        stage_seconds: Seconds since the running trial started.
+
+    Returns:
+        The running trial with its own estimate (or the mean trial time), the trials after it
+        with the mean trial time.
+    """
+    if not progress.get("mean_trial_seconds"):
+        return None
+    later_trials = progress["n_trials"] - progress["finished_trials"] - 1
+    running = remaining
+    if running is None:
+        running = max(progress["mean_trial_seconds"] - stage_seconds, 0)
+    return running + later_trials * progress["mean_trial_seconds"]
+
+
+@dataclass
+class Line:
+    """One run in the compact view - one table row; the innermost counter gets the bar."""
+
+    run: str
+    phase: str
+    stage: str
+    position: str
+    done: int | None
+    total: int | None
+    estimate: str
+    updated: str
+
+
+def summarize(
+    progress: dict,
+    pods: dict[str, str] | None,
+    tracker: SpeedTracker,
+    now: float,
+) -> Line:
+    """Return one run as one line of the compact view.
+
+    Args:
+        progress: One parsed progress file.
+        pods: Pod phases from read_pods, None if kubectl failed.
+        tracker: Speed of the runs over the refreshes.
+        now: Current time in seconds since the epoch.
+
+    Returns:
+        The run, its pod phase, the stage, the trials, epoch, step (one step = one batch) and
+        pairs it has reached, the bar of the innermost of them and the estimates.
+    """
+    phase = pod_phase(progress, pods)
+    stage_seconds = seconds_since(progress["stage_started_at"], now)
+    parts = []
+    done = total = None
+    if "trial" in progress:
+        parts.append(f"trials {progress['finished_trials']}/{progress['n_trials']}")
+        done, total = progress["finished_trials"], progress["n_trials"]
+    if "step" in progress:
+        parts.append(
+            f"epoch {progress['epoch']}/{progress['n_epochs']}, "
+            f"step {progress['step']}/{progress['n_steps']}",
+        )
+        done, total = progress["step"], progress["n_steps"]
+        # only the trials score the validation pairs after each epoch, not the final training
+        if progress["stage"] == "tuning" and progress["step"] == progress["n_steps"]:
+            parts.append("validation scoring")
+    if "pairs_done" in progress:
+        split = f"{progress['split']} " if "split" in progress else ""
+        parts.append(f"{split}pairs {progress['pairs_done']}/{progress['n_pairs']}")
+        done, total = progress["pairs_done"], progress["n_pairs"]
+    remaining = tracker.remaining_seconds(progress)
+    tuning_seconds = estimate_tuning_seconds(progress, remaining, stage_seconds)
+    estimates = []
+    if remaining is not None:
+        estimates.append(f"training {format_duration(remaining)}")
+    if tuning_seconds is not None:
+        estimates.append(f"tuning {format_duration(tuning_seconds)}")
+    stage = progress["stage"]
+    if not estimates:
+        # without an estimate, the time in the stage shows that the run moves
+        stage = f"{stage} ({format_duration(stage_seconds)})"
+    return Line(
+        run=progress["run"],
+        phase=phase,
+        stage=stage,
+        position=", ".join(parts),
+        done=done,
+        total=total,
+        estimate=", ".join(estimates),
+        updated=format_duration(seconds_since(progress["updated_at"], now)),
+    )
+
+
 def describe(
     progress: dict,
     pods: dict[str, str] | None,
@@ -145,12 +259,9 @@ def describe(
         The run and its pod, the stage, the bars and the estimates.
     """
     pod = progress["host"]
-    phase = "kubectl not reachable" if pods is None else pods.get(pod, "pod gone")
-    rows = [Row(f"{progress['run']}  -  pod {pod} {phase}")]
+    rows = [Row(f"{progress['run']}  -  pod {pod} {pod_phase(progress, pods)}")]
     stage = progress["stage"]
-    stage_seconds = (
-        now - datetime.fromisoformat(progress["stage_started_at"]).timestamp()
-    )
+    stage_seconds = seconds_since(progress["stage_started_at"], now)
     if "trial" in progress:
         rows.append(
             Row(
@@ -158,7 +269,7 @@ def describe(
                 f"{progress['n_trials']} finished",
                 progress["finished_trials"],
                 progress["n_trials"],
-            )
+            ),
         )
     else:
         rows.append(Row(f"  {stage} - for {format_duration(stage_seconds)}"))
@@ -169,7 +280,7 @@ def describe(
                 f"{progress['n_steps']}, loss {progress['loss']:.4f}",
                 progress["step"],
                 progress["n_steps"],
-            )
+            ),
         )
         # only the trials score the validation pairs after each epoch, not the final training
         if stage == "tuning" and progress["step"] == progress["n_steps"]:
@@ -180,23 +291,18 @@ def describe(
                 f"  pairs {progress['pairs_done']} / {progress['n_pairs']}",
                 progress["pairs_done"],
                 progress["n_pairs"],
-            )
+            ),
         )
     remaining = tracker.remaining_seconds(progress)
     if remaining is not None:
         rows.append(Row(f"  this training ends in about {format_duration(remaining)}"))
-    if progress.get("mean_trial_seconds"):
-        # the running trial with its own estimate, the trials after it with the mean
-        later_trials = progress["n_trials"] - progress["finished_trials"] - 1
-        running = remaining
-        if running is None:
-            running = max(progress["mean_trial_seconds"] - stage_seconds, 0)
-        tuning_seconds = running + later_trials * progress["mean_trial_seconds"]
+    tuning_seconds = estimate_tuning_seconds(progress, remaining, stage_seconds)
+    if tuning_seconds is not None:
         rows.append(
             Row(
                 f"  the tuning ends in about {format_duration(tuning_seconds)} "
-                "(the final training not included)"
-            )
+                "(the final training not included)",
+            ),
         )
     updated = datetime.fromisoformat(progress["updated_at"]).timestamp()
     rows.append(Row(f"  updated {format_duration(now - updated)} ago"))
@@ -214,7 +320,12 @@ def pods_without_progress(pods: dict[str, str] | None, shown: list[dict]) -> lis
         "Pods without a progress file yet:" and one row per pod, or nothing.
     """
     hosts = {progress["host"] for progress in shown}
-    waiting = sorted(name for name in pods or {} if name not in hosts)
+    # a finished pod has nothing left to wait for
+    waiting = sorted(
+        name
+        for name, phase in (pods or {}).items()
+        if name not in hosts and phase != "Succeeded"
+    )
     if not waiting:
         return []
     return [
@@ -223,67 +334,171 @@ def pods_without_progress(pods: dict[str, str] | None, shown: list[dict]) -> lis
     ]
 
 
-def build_view(tracker: SpeedTracker, log_dir: Path = LOG_DIR) -> Group:
-    """Read the progress files and the pods once and return the view as a table.
+def styled(text: str) -> Text:
+    """Return the text with ROW_STYLES laid over it."""
+    styled_text = Text(text)
+    for pattern, style in ROW_STYLES:
+        styled_text.highlight_regex(pattern, style)
+    return styled_text
 
-    Args:
-        tracker: Speed of the runs over the refreshes.
-        log_dir: Folder of the progress files.
 
-    Returns:
-        A header and one table row per Row - the text, and a bar where the row has one.
-    """
-    now = time.time()
-    pods = read_pods()
-    shown = read_progress_files(log_dir, now)
-    rows = []
-    for progress in shown:
-        rows += [*describe(progress, pods, tracker, now), Row("")]
-    rows += pods_without_progress(pods, shown)
-    if not rows:
-        rows = [
-            Row(f"No progress file changed in the last {SHOWN_HOURS}h in {log_dir}.")
-        ]
+def bar_cells(
+    done: int | None,
+    total: int | None,
+    width: int = BAR_WIDTH,
+) -> tuple[ProgressBar | str, str]:
+    """Return the bar and the percent of a counter, two empty cells without one."""
+    if total is None:
+        return "", ""
+    percent = f"{100 * done // total}%" if total else ""
+    return ProgressBar(total, done, width=width), percent
+
+
+def rows_table(rows: list[Row]) -> Table:
+    """Return the detailed rows as a table - the text, and a bar where the row has one."""
     table = Table.grid(padding=(0, 2))
     table.add_column(no_wrap=True)
     table.add_column(width=BAR_WIDTH)
     table.add_column(justify="right")
     for row in rows:
-        text = Text(row.text)
-        for pattern, style in ROW_STYLES:
-            text.highlight_regex(pattern, style)
-        if row.total is None:
-            table.add_row(text, "", "")
-        else:
-            percent = f"{100 * row.done // row.total}%" if row.total else ""
-            table.add_row(
-                text,
-                ProgressBar(row.total, row.done, width=BAR_WIDTH),
-                percent,
-            )
-    header = Text(
-        f"{datetime.now(UTC).astimezone():%H:%M:%S %Z} - Ctrl+C ends this view, never a Job\n"
+        table.add_row(styled(row.text), *bar_cells(row.done, row.total))
+    return table
+
+
+def lines_table(lines: list[Line], width: int | None = None) -> Table:
+    """Return the compact view - one run per row, with a header.
+
+    Args:
+        lines: The runs, one Line each.
+        width: Columns of the terminal; the run names are cut first so that the
+            counters and the estimates always stay on the screen. None leaves them whole.
+
+    Returns:
+        The table.
+    """
+    other_cells = [
+        [line.phase, line.stage, line.position, line.estimate, line.updated]
+        for line in lines
+    ]
+    # the five text columns, the bar, the percent and one space on each side of every column
+    other_width = sum(
+        max(len(cell) for cell in column) for column in zip(*other_cells, strict=True)
     )
-    return Group(header, table)
+    other_width += LINE_BAR_WIDTH + len("100%") + 2 * 8
+    run_width = None if width is None else max(width - other_width, 16)
+    table = Table(box=None, padding=(0, 1), header_style="dim")
+    table.add_column("run", no_wrap=True, overflow="ellipsis", max_width=run_width)
+    table.add_column("pod", no_wrap=True)
+    table.add_column("stage", no_wrap=True)
+    table.add_column("reached", no_wrap=True)
+    table.add_column("", width=LINE_BAR_WIDTH)
+    table.add_column("", justify="right", no_wrap=True)
+    table.add_column("ends in about", no_wrap=True)
+    table.add_column("last write", no_wrap=True, style="dim")
+    for line in lines:
+        table.add_row(
+            Text(line.run.removeprefix("JP_").removesuffix("_v2"), style="bold"),
+            styled(line.phase),
+            line.stage,
+            line.position,
+            *bar_cells(line.done, line.total, LINE_BAR_WIDTH),
+            line.estimate,
+            line.updated,
+        )
+    return table
+
+
+def build_view(
+    tracker: SpeedTracker,
+    log_dir: Path = LOG_DIR,
+    *,
+    show_finished: bool = False,
+    detail: bool = False,
+    width: int | None = None,
+) -> Group:
+    """Read the progress files and the pods once and return the view.
+
+    Args:
+        tracker: Speed of the runs over the refreshes.
+        log_dir: Folder of the progress files.
+        show_finished: Also show the runs whose stage is done; otherwise they are only counted.
+        detail: Several rows per run (pod name, loss, every estimate) instead of one.
+        width: Columns of the terminal, for the compact view; None leaves the run names whole.
+
+    Returns:
+        A header, the runs, the pods without a progress file and the count of hidden runs.
+    """
+    now = time.time()
+    pods = read_pods()
+    shown = read_progress_files(log_dir, now)
+    active = [
+        progress for progress in shown if show_finished or progress["stage"] != "done"
+    ]
+    parts = [
+        Text(
+            f"{datetime.now(UTC).astimezone():%H:%M:%S %Z} - Ctrl+C ends this view, never a Job\n",
+        ),
+    ]
+    if detail:
+        rows = []
+        for progress in active:
+            rows += [*describe(progress, pods, tracker, now), Row("")]
+        parts.append(rows_table(rows))
+    elif active:
+        lines = [summarize(progress, pods, tracker, now) for progress in active]
+        parts.append(lines_table(lines, width))
+    # the pods of hidden runs are not waiting, so every read file counts
+    extra_rows = pods_without_progress(pods, shown)
+    n_hidden = len(shown) - len(active)
+    if n_hidden:
+        extra_rows.append(Row(f"{n_hidden} finished runs hidden (--all shows them)"))
+    if not shown:
+        extra_rows.append(
+            Row(f"No progress file changed in the last {SHOWN_HOURS}h in {log_dir}."),
+        )
+    if extra_rows:
+        parts.append(rows_table([Row(""), *extra_rows]))
+    return Group(*parts)
 
 
 def main() -> None:
     """Redraw the view every REFRESH_SECONDS until Ctrl+C."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--once", action="store_true", help="print the view once and stop"
+        "--once",
+        action="store_true",
+        help="print the view once and stop",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="also show the finished runs",
+    )
+    parser.add_argument(
+        "--detail",
+        action="store_true",
+        help="several rows per run instead of one",
     )
     args = parser.parse_args()
     console = Console()
     tracker = SpeedTracker()
+
+    def view() -> Group:
+        return build_view(
+            tracker,
+            show_finished=args.all,
+            detail=args.detail,
+            width=console.width,
+        )
+
     if args.once:
-        console.print(build_view(tracker))
+        console.print(view())
         return
     try:
-        with Live(build_view(tracker), console=console, auto_refresh=False) as live:
+        with Live(view(), console=console, auto_refresh=False) as live:
             while True:
                 time.sleep(REFRESH_SECONDS)
-                live.update(build_view(tracker), refresh=True)
+                live.update(view(), refresh=True)
     except KeyboardInterrupt:
         console.print("View stopped - the Jobs keep running.")
 
