@@ -29,7 +29,7 @@ experiments/conf/local
 # PyCharm project files
 .idea/
 
-/tools/
+/tools/step2/
 
 /dataset_count2.py
 /ultrareview-findings.md
