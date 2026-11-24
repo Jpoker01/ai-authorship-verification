@@ -1,8 +1,8 @@
 """Live view of every running experiment on dt - reads ~/logs/*.progress.json and kubectl.
 
-Run from a terminal on the dt hub server, in the launch checkout ~/launch/<tag>/experiments:
-".venv/bin/python k8s/watch_progress.py" (launch.sh starts it after the kubectl apply).
-Ctrl+C or a closed terminal ends ONLY this view, never a Job.
+Run from a terminal on the dt hub server, in the development checkout (LAUNCH_COMMAND);
+launch.sh starts it after the kubectl apply. Ctrl+C or a closed terminal ends ONLY this view,
+never a Job.
 """
 
 import argparse
@@ -21,6 +21,11 @@ from rich.table import Table
 from rich.text import Text
 
 LOG_DIR = Path.home() / "logs"
+# shown at the top of the view, so the command is at hand in a new terminal
+LAUNCH_COMMAND = (
+    "cd ~/diploma_thesis/experiments && .venv/bin/python k8s/watch_progress.py"
+    "  [--all finished runs] [--detail several rows per run] [--once one snapshot]"
+)
 REFRESH_SECONDS = 10
 # progress files untouched for longer are finished or abandoned runs
 SHOWN_HOURS = 24
@@ -222,7 +227,8 @@ def summarize(
     tuning_seconds = estimate_tuning_seconds(progress, remaining, stage_seconds)
     estimates = []
     if remaining is not None:
-        estimates.append(f"training {format_duration(remaining)}")
+        label = "trial" if "trial" in progress else "training"
+        estimates.append(f"{label} {format_duration(remaining)}")
     if tuning_seconds is not None:
         estimates.append(f"tuning {format_duration(tuning_seconds)}")
     stage = progress["stage"]
@@ -436,7 +442,9 @@ def build_view(
     ]
     parts = [
         Text(
-            f"{datetime.now(UTC).astimezone():%H:%M:%S %Z} - Ctrl+C ends this view, never a Job\n",
+            f"{datetime.now(UTC).astimezone():%H:%M:%S %Z} - Ctrl+C ends this view, never a Job\n"
+            f"Run: {LAUNCH_COMMAND}\n",
+            style="dim",
         ),
     ]
     if detail:
