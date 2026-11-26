@@ -1,8 +1,10 @@
 import re
+import warnings
 
 import joblib
 import numpy as np
 from bs4 import BeautifulSoup
+from sklearn.exceptions import InconsistentVersionWarning
 
 from .config import CLASSIFIER_PATH, MODEL_DIR, VECTORIZER_PATH
 
@@ -30,20 +32,22 @@ def _load_models():
     if not classifier_path.exists():
         raise FileNotFoundError(f"Classifier model not found at {classifier_path}. ")
 
-    # Try loading with joblib (used in experiments)
-    _vectorizer = joblib.load(vectorizer_path)
-    _classifier = joblib.load(classifier_path)
+    # A model saved with another scikit-learn version can silently give other scores
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", InconsistentVersionWarning)
+        _vectorizer = joblib.load(vectorizer_path)
+        _classifier = joblib.load(classifier_path)
 
     # Verify the loaded objects are correct types
     if not hasattr(_vectorizer, "transform"):
         raise ValueError(
             "Loaded vectorizer doesn't have transform method. "
-            "Please ensure the correct model file is saved."
+            "Please ensure the correct model file is saved.",
         )
     if not hasattr(_classifier, "predict_proba"):
         raise ValueError(
             "Loaded classifier doesn't have predict_proba method. "
-            "Please ensure the correct model file is saved."
+            "Please ensure the correct model file is saved.",
         )
 
     _models_loaded = True
