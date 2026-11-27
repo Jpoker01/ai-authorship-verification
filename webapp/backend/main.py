@@ -1,11 +1,24 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from core import ml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import predict
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Load the models at startup, so a missing or incompatible model file stops the deployment."""
+    ml.load_models()
+    yield
+
 
 app = FastAPI(
     title="Authorship Verification DT - backend",
     description="API for verifying if two texts are written by the same author",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS set up - only for demo purposes
