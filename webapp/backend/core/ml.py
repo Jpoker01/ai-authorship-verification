@@ -1,12 +1,14 @@
+import json
 import re
 import warnings
+from collections.abc import Callable
 from functools import lru_cache
 from typing import NamedTuple
 
 import joblib
-import numpy as np
 from bs4 import BeautifulSoup
 from bs4.exceptions import ParserRejectedMarkup
+from scipy.sparse import spmatrix
 from sklearn.base import BaseEstimator
 from sklearn.exceptions import InconsistentVersionWarning
 
@@ -15,12 +17,30 @@ from .config import (
     MAX_LESS_THAN_SIGNS,
     MAX_OPENING_BRACKETS,
     MODEL_DIR,
+    MODEL_INFO_PATH,
     VECTORIZER_PATH,
 )
 
 # [^]] = any character except "]", so every [...] block is removed
 _BRACKET_BLOCK = re.compile(r"\[[^]]*\]")
 _NOT_KEPT = re.compile(r"[^a-zA-Z0-9\s,']")
+
+
+def _absolute_difference(vector1: spmatrix, vector2: spmatrix) -> spmatrix:
+    """Return |vector1 - vector2|, feature by feature."""
+    return abs(vector1 - vector2)
+
+
+def _element_wise_product(vector1: spmatrix, vector2: spmatrix) -> spmatrix:
+    """Return vector1 * vector2, feature by feature."""
+    return vector1.multiply(vector2)
+
+
+# Keys are the combination names the experiments log
+COMBINATIONS: dict[str, Callable[[spmatrix, spmatrix], spmatrix]] = {
+    "absolute_difference": _absolute_difference,
+    "element-wise": _element_wise_product,
+}
 
 
 class UnsupportedTextError(ValueError):
@@ -32,11 +52,12 @@ class Models(NamedTuple):
 
     vectorizer: BaseEstimator
     classifier: BaseEstimator
+    combination: str
 
 
 @lru_cache(maxsize=1)
 def load_models() -> Models:
-    """Load the vectorizer and classifier from disk on the first call only.
+    """Load the vectorizer, the classifier and their combination on the first call only.
 
     Returns:
         The loaded models, the same object on every later call.
@@ -45,7 +66,8 @@ def load_models() -> Models:
         FileNotFoundError: If a model file is missing.
         InconsistentVersionWarning: If a model file was saved with another
             scikit-learn version.
-        ValueError: If a loaded object is not a vectorizer or a classifier.
+        ValueError: If a loaded object is not a vectorizer or a classifier, or the
+            combination in model_info.json is unknown.
     """
     vectorizer_path = MODEL_DIR / VECTORIZER_PATH
     classifier_path = MODEL_DIR / CLASSIFIER_PATH
@@ -73,7 +95,12 @@ def load_models() -> Models:
             "Please ensure the correct model file is saved.",
         )
 
-    return Models(vectorizer=vectorizer, classifier=classifier)
+    model_info = json.loads(MODEL_INFO_PATH.read_text(encoding="utf-8"))
+    combination = model_info["combination"]
+    if combination not in COMBINATIONS:
+        raise ValueError(f"Unknown combination {combination!r} in {MODEL_INFO_PATH}.")
+
+    return Models(vectorizer=vectorizer, classifier=classifier, combination=combination)
 
 
 def clean_text(text: str) -> str:
@@ -149,7 +176,8 @@ def predict_probability(text1: str, text2: str) -> float:
 
     features = np.abs(text1_embedding - text2_embedding)
 
-    probabilities = models.classifier.predict_proba(features)[0, 1]
+    combine = COMBINATIONS[models.combination]
+    features = combine(text1_embedding, text2_embedding)
 
     # Return probability of same author (index 1)
     same_author_probability = float(probabilities)
