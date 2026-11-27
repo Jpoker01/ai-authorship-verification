@@ -134,3 +134,41 @@ def test_predict_probability_rejects_unsupported_markup_in_either_text() -> None
         ml.predict_probability(unsupported_text, text)
     with pytest.raises(ml.UnsupportedTextError):
         ml.predict_probability(text, unsupported_text)
+
+
+def test_model_info_names_a_known_combination() -> None:
+    """The combination in model_info.json is one the app can build."""
+    models = ml.load_models()
+    assert models.combination in ml.COMBINATIONS
+
+
+def test_predict_probability_uses_the_combination_of_the_models() -> None:
+    """An element-wise model gets the element-wise product of the two vectors."""
+    text1 = "the cat sat on the mat and looked at the dog " * 20
+    text2 = "a bird flew over the house and sang in the morning " * 20
+    real_models = ml.load_models()
+    element_wise_models = real_models._replace(combination="element-wise")
+    vector1 = real_models.vectorizer.transform([ml.clean_text(text1)])
+    vector2 = real_models.vectorizer.transform([ml.clean_text(text2)])
+    features = vector1.multiply(vector2)
+    expected_score = float(real_models.classifier.predict_proba(features)[0, 1])
+
+    with patch("core.ml.load_models", return_value=element_wise_models):
+        score = ml.predict_probability(text1, text2)
+
+    assert score == expected_score
+    assert score != ml.predict_probability(text1, text2)
+
+
+def test_load_models_refuses_an_unknown_combination(
+    tmp_path,
+    monkeypatch,
+    unloaded_models,
+) -> None:
+    """A combination the app cannot build stops the loading."""
+    model_info_path = tmp_path / "model_info.json"
+    model_info_path.write_text('{"combination": "sum"}', encoding="utf-8")
+    monkeypatch.setattr(ml, "MODEL_INFO_PATH", model_info_path)
+
+    with pytest.raises(ValueError, match="Unknown combination"):
+        ml.load_models()
