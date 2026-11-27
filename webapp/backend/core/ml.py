@@ -165,6 +165,18 @@ def clean_submitted_text(text: str) -> str:
     return clean_text(text)
 
 
+def _pair_features(models: Models, text1: str, text2: str) -> spmatrix:
+    """Clean, vectorize and combine two texts into the classifier input (one row)."""
+    text1 = clean_submitted_text(text1)
+    text2 = clean_submitted_text(text2)
+
+    text1_embedding = models.vectorizer.transform([text1])
+    text2_embedding = models.vectorizer.transform([text2])
+
+    combine = COMBINATIONS[models.combination]
+    return combine(text1_embedding, text2_embedding)
+
+
 def predict_probability(text1: str, text2: str) -> float:
     """
     Predict the probability that two texts are written by the same author.
@@ -182,35 +194,34 @@ def predict_probability(text1: str, text2: str) -> float:
         UnsupportedTextError: If a text cannot be cleaned safely
     """
     models = load_models()
+    features = _pair_features(models, text1, text2)
 
-    text1 = clean_submitted_text(text1)
-    text2 = clean_submitted_text(text2)
-
-    text1_embedding = models.vectorizer.transform([text1])
-    text2_embedding = models.vectorizer.transform([text2])
-
-    combine = COMBINATIONS[models.combination]
-    features = combine(text1_embedding, text2_embedding)
-
-    probabilities = models.classifier.predict_proba(features)[0, 1]
-
-    # Return probability of same author (index 1)
-    same_author_probability = float(probabilities)
-
-    return same_author_probability
+    # Column 1 of predict_proba = the same-author class
+    return float(models.classifier.predict_proba(features)[0, 1])
 
 
-def predict(text1: str, text2: str) -> dict:
-    """
-    Predict authorship and return probability.
+def predict(text1: str, text2: str) -> dict[str, Any]:
+    """Decide whether two texts were written by the same author.
 
     Args:
-        text1: First text to compare
-        text2: Second text to compare
+        text1: First text to compare.
+        text2: Second text to compare.
 
     Returns:
-        Dictionary with same_author_probability
-    """
-    probability = predict_probability(text1, text2)
+        same_author (the decision of the classifier), score (its probability of
+        the same-author class) and model (name and test results of the model).
 
-    return {"same_author_probability": probability}
+    Raises:
+        UnsupportedTextError: If a text cannot be cleaned safely.
+    """
+    models = load_models()
+    features = _pair_features(models, text1, text2)
+
+    same_author = bool(models.classifier.predict(features)[0])
+    score = float(models.classifier.predict_proba(features)[0, 1])
+
+    return {
+        "same_author": same_author,
+        "score": score,
+        "model": models.description,
+    }
