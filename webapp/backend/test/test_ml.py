@@ -9,9 +9,9 @@ OTHER_SKLEARN_VERSION = "0.0.0"
 
 
 @pytest.fixture
-def unloaded_models(monkeypatch):
+def unloaded_models() -> None:
     """Force the next call to load the model files from disk."""
-    monkeypatch.setattr(ml, "_models_loaded", False)
+    ml.load_models.cache_clear()
 
 
 @pytest.mark.parametrize("path_name", ["VECTORIZER_PATH", "CLASSIFIER_PATH"])
@@ -29,10 +29,10 @@ def test_load_models_refuses_each_file_from_other_sklearn_version(
         joblib.dump(model, other_version_path)
     monkeypatch.setattr(ml, path_name, other_version_path)
     with pytest.raises(InconsistentVersionWarning):
-        ml._load_models()
+        ml.load_models()
 
 
 def test_load_models_accepts_same_sklearn_version(unloaded_models):
     """Model files saved with the installed scikit-learn version load."""
-    ml._load_models()
-    assert ml._models_loaded
+    models = ml.load_models()
+    assert isinstance(models, ml.Models)
