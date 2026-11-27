@@ -1,3 +1,8 @@
 {
-  "combination": "absolute_difference"
+  "run_name": "JP_traditional_word_TF-IDF_absolute_difference_logistic_regression_v2",
+  "combination": "absolute_difference",
+  "name": "TF-IDF of words, absolute difference, logistic regression",
+  "test_f1": 0.9044,
+  "test_accuracy": 0.9068,
+  "test_pairs": 19999
 }
