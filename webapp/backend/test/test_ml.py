@@ -3,6 +3,8 @@ from unittest.mock import patch
 import joblib
 import pytest
 from core import ml
+from fastapi.testclient import TestClient
+from main import app
 from sklearn.exceptions import InconsistentVersionWarning
 
 OTHER_SKLEARN_VERSION = "0.0.0"
@@ -36,3 +38,16 @@ def test_load_models_accepts_same_sklearn_version(unloaded_models):
     """Model files saved with the installed scikit-learn version load."""
     models = ml.load_models()
     assert isinstance(models, ml.Models)
+
+
+def test_load_models_returns_the_same_models_on_every_call(unloaded_models) -> None:
+    """The model files are loaded only once, later calls return the same models."""
+    first_models = ml.load_models()
+    second_models = ml.load_models()
+    assert second_models is first_models
+
+
+def test_startup_loads_the_models() -> None:
+    """The models are loaded when the application starts, not on the first request."""
+    with patch("core.ml.load_models") as mock_load_models, TestClient(app):
+        mock_load_models.assert_called_once_with()
