@@ -174,10 +174,10 @@ def predict_probability(text1: str, text2: str) -> float:
     text1_embedding = models.vectorizer.transform([text1])
     text2_embedding = models.vectorizer.transform([text2])
 
-    features = np.abs(text1_embedding - text2_embedding)
-
     combine = COMBINATIONS[models.combination]
     features = combine(text1_embedding, text2_embedding)
+
+    probabilities = models.classifier.predict_proba(features)[0, 1]
 
     # Return probability of same author (index 1)
     same_author_probability = float(probabilities)
