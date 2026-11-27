@@ -8,6 +8,23 @@ from main import app
 from sklearn.exceptions import InconsistentVersionWarning
 
 OTHER_SKLEARN_VERSION = "0.0.0"
+CLEAN_TEXT_CASES = [
+    ("<b>bold</b> text", "bold text"),
+    ("&amp; don&#39;t", " don't"),
+    ("a [note] b", "a  b"),
+    ("[[x]] y", " y"),
+    ("[a] b [c] d", " b  d"),
+    ("&#91;x&#93; y", " y"),
+    ("x[x", "xx"),
+    ("x\\x", "xx"),
+    ("x]x", "xx"),
+    ("x^x", "xx"),
+    ("x_x", "xx"),
+    ("x`x", "xx"),
+    ('x.!?;:-"()x', "xx"),
+    ("Ab 9,\t'\n  \x1c", "Ab 9,\t'\n  \x1c"),
+    ("café", "caf"),
+]
 
 
 @pytest.fixture
@@ -63,9 +80,25 @@ def test_startup_fails_when_the_models_cannot_be_loaded() -> None:
         pass
 
 
+@pytest.mark.parametrize(("text", "expected"), CLEAN_TEXT_CASES)
+def test_clean_text(text: str, expected: str) -> None:
+    """Removes HTML and [...] blocks and keeps only letters, digits, whitespace, comma and apostrophe."""
+    assert ml.clean_text(text) == expected
+
+
 def test_predict_probability_uses_the_cached_models() -> None:
     """A prediction takes the models from load_models instead of reading the files again."""
     text = "the cat sat on the mat and looked at the dog " * 20
     with patch("core.ml.load_models", wraps=ml.load_models) as spy_load_models:
         ml.predict_probability(text, text)
     spy_load_models.assert_called_once_with()
+
+
+def test_predict_probability_cleans_the_texts_before_vectorizing() -> None:
+    """Markup and [...] blocks removed by the cleaning do not change the score."""
+    text = "the cat sat on the mat and looked at the dog " * 20
+    markup = '<div class="story">[the first chapter of the story]</div>' * 50
+    text_with_markup = markup + text
+    score = ml.predict_probability(text, text)
+    score_with_markup = ml.predict_probability(text_with_markup, text)
+    assert score_with_markup == score

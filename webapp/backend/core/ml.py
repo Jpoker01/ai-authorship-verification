@@ -11,6 +11,10 @@ from sklearn.exceptions import InconsistentVersionWarning
 
 from .config import CLASSIFIER_PATH, MODEL_DIR, VECTORIZER_PATH
 
+# [^]] = any character except "]", so every [...] block is removed
+_BRACKET_BLOCK = re.compile(r"\[[^]]*\]")
+_NOT_KEPT = re.compile(r"[^a-zA-Z0-9\s,']")
+
 
 class Models(NamedTuple):
     """Fitted vectorizer and classifier the predictions are made with."""
@@ -62,15 +66,18 @@ def load_models() -> Models:
 
 
 def clean_text(text: str) -> str:
+    """Remove HTML markup, [...] blocks and every character outside the kept set.
+
+    Args:
+        text: One raw PAN text.
+
+    Returns:
+        The text with only ASCII letters, digits, whitespace, commas and apostrophes.
     """
-    Clean the text the same way as the training data
-    (experiments/notebooks/dataset/v1/transformer_dataset_preprocessing.ipynb).
-    """
-    soup = BeautifulSoup(text, "html.parser")
-    text = re.sub(r"\[[^]]*\]", "", soup.get_text())
-    pattern = r"[^a-zA-z0-9\s,']"
-    text = re.sub(pattern, "", text)
-    return text
+    text_html_parsed = BeautifulSoup(text, "html.parser").get_text()
+    text_no_brackets = _BRACKET_BLOCK.sub("", text_html_parsed)
+    text_desired_characters = _NOT_KEPT.sub("", text_no_brackets)
+    return text_desired_characters
 
 
 def predict_probability(text1: str, text2: str) -> float:
