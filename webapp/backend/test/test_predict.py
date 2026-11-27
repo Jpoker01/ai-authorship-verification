@@ -1,4 +1,7 @@
+from core import ml
+from fastapi import status
 from fastapi.testclient import TestClient
+from routers.predict import UNSUPPORTED_TEXT_DETAIL
 
 
 def test_predict_success(client: TestClient, mock_predict, sample_texts):
@@ -19,7 +22,8 @@ def test_predict_text1_too_short(client, mock_predict, sample_text):
     short_text = "Short text"
 
     response = client.post(
-        "/predict/", json={"text1": short_text, "text2": sample_text["text"]}
+        "/predict/",
+        json={"text1": short_text, "text2": sample_text["text"]},
     )
 
     assert response.status_code == 422  # Unprocessable content error
@@ -31,7 +35,8 @@ def test_predict_text2_too_short(client, mock_predict, sample_text):
     short_text = "Short text"
 
     response = client.post(
-        "/predict/", json={"text1": sample_text["text"], "text2": short_text}
+        "/predict/",
+        json={"text1": sample_text["text"], "text2": short_text},
     )
 
     assert response.status_code == 422  # Unprocessable content error
@@ -50,7 +55,8 @@ def test_predict_text1_too_long(client, mock_predict, sample_text):
     """Test prediction fails when text1 is too long."""
     long_text = sample_text["text"] * 10
     response = client.post(
-        "/predict/", json={"text1": long_text, "text2": sample_text["text"]}
+        "/predict/",
+        json={"text1": long_text, "text2": sample_text["text"]},
     )
 
     assert response.status_code == 422
@@ -61,7 +67,8 @@ def test_predict_text2_too_long(client, mock_predict, sample_text):
     """Test prediction fails when text2 is too long."""
     long_text = sample_text["text"] * 10
     response = client.post(
-        "/predict/", json={"text1": sample_text["text"], "text2": long_text}
+        "/predict/",
+        json={"text1": sample_text["text"], "text2": long_text},
     )
     assert response.status_code == 422
     mock_predict.assert_not_called()
@@ -194,3 +201,13 @@ def test_invalid_predict_http_method(client):
     """Test that GET is not allowed on predict endpoint."""
     response = client.get("/predict/")
     assert response.status_code == 405  # method not allowed code
+
+
+def test_predict_unsupported_text_returns_422(client, mock_predict, sample_texts):
+    """A text the model cannot take returns 422 with a fixed message."""
+    mock_predict.side_effect = ml.UnsupportedTextError("raw error text")
+
+    response = client.post("/predict/", json=sample_texts)
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert response.json() == {"detail": UNSUPPORTED_TEXT_DETAIL}
