@@ -3,7 +3,7 @@ import re
 import warnings
 from collections.abc import Callable
 from functools import lru_cache
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import joblib
 from bs4 import BeautifulSoup
@@ -53,6 +53,8 @@ class Models(NamedTuple):
     vectorizer: BaseEstimator
     classifier: BaseEstimator
     combination: str
+    # name and test results of the model, returned with every prediction
+    description: dict[str, Any]
 
 
 @lru_cache(maxsize=1)
@@ -68,6 +70,7 @@ def load_models() -> Models:
             scikit-learn version.
         ValueError: If a loaded object is not a vectorizer or a classifier, or the
             combination in model_info.json is unknown.
+        KeyError: If model_info.json misses a field of the model description.
     """
     vectorizer_path = MODEL_DIR / VECTORIZER_PATH
     classifier_path = MODEL_DIR / CLASSIFIER_PATH
@@ -100,7 +103,19 @@ def load_models() -> Models:
     if combination not in COMBINATIONS:
         raise ValueError(f"Unknown combination {combination!r} in {MODEL_INFO_PATH}.")
 
-    return Models(vectorizer=vectorizer, classifier=classifier, combination=combination)
+    description = {
+        "name": model_info["name"],
+        "test_f1": model_info["test_f1"],
+        "test_accuracy": model_info["test_accuracy"],
+        "test_pairs": model_info["test_pairs"],
+    }
+
+    return Models(
+        vectorizer=vectorizer,
+        classifier=classifier,
+        combination=combination,
+        description=description,
+    )
 
 
 def clean_text(text: str) -> str:
