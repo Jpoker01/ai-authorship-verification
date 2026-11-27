@@ -1,30 +1,39 @@
 import re
 import warnings
+from functools import lru_cache
+from typing import NamedTuple
 
 import joblib
 import numpy as np
 from bs4 import BeautifulSoup
+from sklearn.base import BaseEstimator
 from sklearn.exceptions import InconsistentVersionWarning
 
 from .config import CLASSIFIER_PATH, MODEL_DIR, VECTORIZER_PATH
 
-# module variables
-_vectorizer = None
-_classifier = None
 
-# variable to track if models are loaded and prevent reloading
-_models_loaded = False
+class Models(NamedTuple):
+    """Fitted vectorizer and classifier the predictions are made with."""
+
+    vectorizer: BaseEstimator
+    classifier: BaseEstimator
 
 
-def _load_models():
-    """Load the TF-IDF vectorizer and classifier from disk."""
-    global _vectorizer, _classifier, _models_loaded
+@lru_cache(maxsize=1)
+def load_models() -> Models:
+    """Load the vectorizer and classifier from disk on the first call only.
 
+    Returns:
+        The loaded models, the same object on every later call.
+
+    Raises:
+        FileNotFoundError: If a model file is missing.
+        InconsistentVersionWarning: If a model file was saved with another
+            scikit-learn version.
+        ValueError: If a loaded object is not a vectorizer or a classifier.
+    """
     vectorizer_path = MODEL_DIR / VECTORIZER_PATH
     classifier_path = MODEL_DIR / CLASSIFIER_PATH
-
-    if _models_loaded:
-        return
 
     if not vectorizer_path.exists():
         raise FileNotFoundError(f"Vectorizer model not found at {vectorizer_path}. ")
@@ -35,22 +44,21 @@ def _load_models():
     # A model saved with another scikit-learn version can silently give other scores
     with warnings.catch_warnings():
         warnings.simplefilter("error", InconsistentVersionWarning)
-        _vectorizer = joblib.load(vectorizer_path)
-        _classifier = joblib.load(classifier_path)
+        vectorizer = joblib.load(vectorizer_path)
+        classifier = joblib.load(classifier_path)
 
-    # Verify the loaded objects are correct types
-    if not hasattr(_vectorizer, "transform"):
+    if not hasattr(vectorizer, "transform"):
         raise ValueError(
             "Loaded vectorizer doesn't have transform method. "
             "Please ensure the correct model file is saved.",
         )
-    if not hasattr(_classifier, "predict_proba"):
+    if not hasattr(classifier, "predict_proba"):
         raise ValueError(
             "Loaded classifier doesn't have predict_proba method. "
             "Please ensure the correct model file is saved.",
         )
 
-    _models_loaded = True
+    return Models(vectorizer=vectorizer, classifier=classifier)
 
 
 def clean_text(text: str) -> str:
@@ -80,18 +88,17 @@ def predict_probability(text1: str, text2: str) -> float:
         FileNotFoundError: If model files are not found
         ValueError: If loaded models are invalid
     """
-    # Load models on first call - if already loaded, return from the function
-    _load_models()
+    models = load_models()
 
     text1 = clean_text(text1)
     text2 = clean_text(text2)
 
-    text1_embedding = _vectorizer.transform([text1])
-    text2_embedding = _vectorizer.transform([text2])
+    text1_embedding = models.vectorizer.transform([text1])
+    text2_embedding = models.vectorizer.transform([text2])
 
     features = np.abs(text1_embedding - text2_embedding)
 
-    probabilities = _classifier.predict_proba(features)[0, 1]
+    probabilities = models.classifier.predict_proba(features)[0, 1]
 
     # Return probability of same author (index 1)
     same_author_probability = float(probabilities)
