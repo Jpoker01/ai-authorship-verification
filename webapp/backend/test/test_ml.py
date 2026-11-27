@@ -16,6 +16,12 @@ def unloaded_models() -> None:
     ml.load_models.cache_clear()
 
 
+def test_load_models_accepts_same_sklearn_version(unloaded_models):
+    """Model files saved with the installed scikit-learn version load."""
+    models = ml.load_models()
+    assert isinstance(models, ml.Models)
+
+
 @pytest.mark.parametrize("path_name", ["VECTORIZER_PATH", "CLASSIFIER_PATH"])
 def test_load_models_refuses_each_file_from_other_sklearn_version(
     path_name,
@@ -34,12 +40,6 @@ def test_load_models_refuses_each_file_from_other_sklearn_version(
         ml.load_models()
 
 
-def test_load_models_accepts_same_sklearn_version(unloaded_models):
-    """Model files saved with the installed scikit-learn version load."""
-    models = ml.load_models()
-    assert isinstance(models, ml.Models)
-
-
 def test_load_models_returns_the_same_models_on_every_call(unloaded_models) -> None:
     """The model files are loaded only once, later calls return the same models."""
     first_models = ml.load_models()
@@ -51,3 +51,21 @@ def test_startup_loads_the_models() -> None:
     """The models are loaded when the application starts, not on the first request."""
     with patch("core.ml.load_models") as mock_load_models, TestClient(app):
         mock_load_models.assert_called_once_with()
+
+
+def test_startup_fails_when_the_models_cannot_be_loaded() -> None:
+    """A model file that cannot be loaded stops the application before the first request."""
+    with (
+        patch("core.ml.load_models", side_effect=FileNotFoundError),
+        pytest.raises(FileNotFoundError),
+        TestClient(app),
+    ):
+        pass
+
+
+def test_predict_probability_uses_the_cached_models() -> None:
+    """A prediction takes the models from load_models instead of reading the files again."""
+    text = "the cat sat on the mat and looked at the dog " * 20
+    with patch("core.ml.load_models", wraps=ml.load_models) as spy_load_models:
+        ml.predict_probability(text, text)
+    spy_load_models.assert_called_once_with()
