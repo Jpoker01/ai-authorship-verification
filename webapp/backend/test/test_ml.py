@@ -3,6 +3,7 @@ from unittest.mock import patch
 import joblib
 import pytest
 from core import ml
+from core.config import MAX_LESS_THAN_SIGNS, MAX_OPENING_BRACKETS
 from fastapi.testclient import TestClient
 from main import app
 from sklearn.exceptions import InconsistentVersionWarning
@@ -102,3 +103,34 @@ def test_predict_probability_cleans_the_texts_before_vectorizing() -> None:
     score = ml.predict_probability(text, text)
     score_with_markup = ml.predict_probability(text_with_markup, text)
     assert score_with_markup == score
+
+
+def test_clean_submitted_text_accepts_the_maximum_counts() -> None:
+    """A text with exactly the maximum numbers of "<" and "[" is cleaned as usual."""
+    text = "<a " * MAX_LESS_THAN_SIGNS + "[" * MAX_OPENING_BRACKETS
+    assert ml.clean_submitted_text(text) == ml.clean_text(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("<a " * (MAX_LESS_THAN_SIGNS + 1), id="too many less-than signs"),
+        pytest.param("see <![ here", id="markup the parser rejects"),
+        pytest.param("[" * (MAX_OPENING_BRACKETS + 1), id="too many brackets"),
+        pytest.param("&#91;" * (MAX_OPENING_BRACKETS + 1), id="brackets as entities"),
+    ],
+)
+def test_clean_submitted_text_rejects_unsupported_markup(text: str) -> None:
+    """Too many "<" or "[" or markup the parser rejects raise UnsupportedTextError."""
+    with pytest.raises(ml.UnsupportedTextError):
+        ml.clean_submitted_text(text)
+
+
+def test_predict_probability_rejects_unsupported_markup_in_either_text() -> None:
+    """Both texts go through the markup checks before they are vectorized."""
+    text = "the cat sat on the mat and looked at the dog " * 20
+    unsupported_text = "<a " * (MAX_LESS_THAN_SIGNS + 1)
+    with pytest.raises(ml.UnsupportedTextError):
+        ml.predict_probability(unsupported_text, text)
+    with pytest.raises(ml.UnsupportedTextError):
+        ml.predict_probability(text, unsupported_text)
