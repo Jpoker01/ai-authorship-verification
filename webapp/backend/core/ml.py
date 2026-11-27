@@ -6,14 +6,25 @@ from typing import NamedTuple
 import joblib
 import numpy as np
 from bs4 import BeautifulSoup
+from bs4.exceptions import ParserRejectedMarkup
 from sklearn.base import BaseEstimator
 from sklearn.exceptions import InconsistentVersionWarning
 
-from .config import CLASSIFIER_PATH, MODEL_DIR, VECTORIZER_PATH
+from .config import (
+    CLASSIFIER_PATH,
+    MAX_LESS_THAN_SIGNS,
+    MAX_OPENING_BRACKETS,
+    MODEL_DIR,
+    VECTORIZER_PATH,
+)
 
 # [^]] = any character except "]", so every [...] block is removed
 _BRACKET_BLOCK = re.compile(r"\[[^]]*\]")
 _NOT_KEPT = re.compile(r"[^a-zA-Z0-9\s,']")
+
+
+class UnsupportedTextError(ValueError):
+    """Raised when a submitted text cannot be turned into input for the model."""
 
 
 class Models(NamedTuple):
@@ -80,6 +91,38 @@ def clean_text(text: str) -> str:
     return text_desired_characters
 
 
+def clean_submitted_text(text: str) -> str:
+    """Clean one submitted text, refusing input that makes the cleaning very slow.
+
+    Args:
+        text: One text sent to the API.
+
+    Returns:
+        The cleaned text.
+
+    Raises:
+        UnsupportedTextError: If the text has more than MAX_LESS_THAN_SIGNS "<",
+            markup the parser rejects or more than MAX_OPENING_BRACKETS "[".
+    """
+    # Counted before parsing, so a text full of unclosed tags never reaches the parser
+    if text.count("<") > MAX_LESS_THAN_SIGNS:
+        raise UnsupportedTextError(
+            f'The text has more than {MAX_LESS_THAN_SIGNS} "<" characters.',
+        )
+    try:
+        text_html_parsed = BeautifulSoup(text, "html.parser").get_text()
+    except ParserRejectedMarkup as error:
+        raise UnsupportedTextError(
+            "The text has markup that cannot be parsed.",
+        ) from error
+    # Counted after parsing, because entities such as &#91; turn into "[" there
+    if text_html_parsed.count("[") > MAX_OPENING_BRACKETS:
+        raise UnsupportedTextError(
+            f'The text has more than {MAX_OPENING_BRACKETS} "[" characters.',
+        )
+    return clean_text(text)
+
+
 def predict_probability(text1: str, text2: str) -> float:
     """
     Predict the probability that two texts are written by the same author.
@@ -94,11 +137,12 @@ def predict_probability(text1: str, text2: str) -> float:
     Raises:
         FileNotFoundError: If model files are not found
         ValueError: If loaded models are invalid
+        UnsupportedTextError: If a text cannot be cleaned safely
     """
     models = load_models()
 
-    text1 = clean_text(text1)
-    text2 = clean_text(text2)
+    text1 = clean_submitted_text(text1)
+    text2 = clean_submitted_text(text2)
 
     text1_embedding = models.vectorizer.transform([text1])
     text2_embedding = models.vectorizer.transform([text2])
