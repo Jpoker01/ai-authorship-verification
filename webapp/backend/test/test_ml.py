@@ -30,3 +30,9 @@ def test_load_models_refuses_each_file_from_other_sklearn_version(
     monkeypatch.setattr(ml, path_name, other_version_path)
     with pytest.raises(InconsistentVersionWarning):
         ml._load_models()
+
+
+def test_load_models_accepts_same_sklearn_version(unloaded_models):
+    """Model files saved with the installed scikit-learn version load."""
+    ml._load_models()
+    assert ml._models_loaded
